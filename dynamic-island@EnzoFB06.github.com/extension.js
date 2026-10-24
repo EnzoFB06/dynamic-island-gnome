@@ -744,19 +744,9 @@ export default class DynamicIslandExtension extends Extension {
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
 
-        /* The corners are not children of the island, so they are eased with
-         * it rather than carried by it. */
-        if (unit.isPrimary) {
-            for (const corner of this._corners ?? []) {
-                corner.remove_all_transitions();
-                corner.ease({
-                    translation_y: translationY,
-                    opacity,
-                    duration,
-                    mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-                });
-            }
-        }
+        /* The corners are not eased in parallel: they mirror the island's
+         * translation and opacity through notify handlers, so they follow it
+         * frame by frame and cannot end up in a state of their own. */
     }
 
     _queueHideUnit(unit) {
@@ -1090,10 +1080,18 @@ export default class DynamicIslandExtension extends Extension {
             this._corners.push(corner);
         }
 
-        /* The island's allocation changes on every frame of the expansion, and
-         * the corners have to ride along. */
-        this._connect(Main.panel._centerBox, 'notify::allocation',
-            () => this._placeCorners());
+        /* The corners are separate chrome actors, so they can only follow the
+         * island. Copying its state at a few chosen moments is what let them
+         * drift: once the two disagreed, _revealUnit() and _hideUnit() both
+         * return early on the `revealed` flag and nothing ever recalled them --
+         * which is how a hidden island left two corners hanging off the top of
+         * the screen.
+         *
+         * So mirror every property they depend on, every time it moves. */
+        for (const property of ['allocation', 'translation-y', 'opacity']) {
+            this._connect(Main.panel._centerBox, `notify::${property}`,
+                () => this._placeCorners());
+        }
 
         /* Same reason as the reveal strip: real geometry before the layout
          * manager walks its chrome, or it warns on every frame until the first
