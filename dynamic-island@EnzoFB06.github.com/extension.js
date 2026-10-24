@@ -69,6 +69,8 @@ const PANEL_ACTOR_NAME = 'panelBox';
 const RING_SIZE = 66;
 const RING_DOT_RADIUS = 3.2;
 const DOT_SIZE = 7;
+/* How long a fullscreen state must hold before the island reacts to it. */
+const AUTOHIDE_SETTLE_MS = 250;
 /* Album art runs to a few tens of kilobytes; well past this it is not a cover. */
 const COVER_MAX_BYTES = 5 * 1024 * 1024;
 const ACCENT_RUNNING = '#6aa9e0';
@@ -112,13 +114,18 @@ export default class DynamicIslandExtension extends Extension {
             this._apply();
         });
 
-        /* Mutter only reports a window as fullscreen when it really is one, so
-         * these two signals are what drive the auto-hide. */
+        /* Mutter re-evaluates a monitor's fullscreen state on every stacking
+         * change, and it can flip true for a fraction of a second with no
+         * window actually entering fullscreen -- measured while a floating
+         * Firefox window was used over a maximized one. Reacting to each flip
+         * made the island hide and reappear in a loop. These signals are
+         * therefore debounced: a state that does not survive a moment is not a
+         * state worth animating. */
         this._connect(global.display, 'in-fullscreen-changed',
-            () => this._syncAutoHide());
+            () => this._queueSyncAutoHide());
         this._connect(global.display, 'notify::focus-window', () => {
             this._trackFocusWindow();
-            this._syncAutoHide();
+            this._queueSyncAutoHide();
         });
         this._connect(Main.layoutManager, 'monitors-changed', () => {
             this._rebuildSatellites();
@@ -180,6 +187,7 @@ export default class DynamicIslandExtension extends Extension {
         const panel = Main.panel;
 
         this._cancelAllHideTimers();
+        this._cancelSyncTimer();
         this._cancelExpandTimer();
         this._teardownMpris();
         this._untrackFocusWindow();
@@ -420,8 +428,16 @@ export default class DynamicIslandExtension extends Extension {
         this._units.push(unit);
 
         /* The strip is added as top chrome, which would let it intercept clicks
-         * on the island's topmost pixels. Tuck it underneath. */
-        Main.layoutManager.uiGroup.set_child_below_sibling(edge, island);
+         * on the island's topmost pixels. Tuck it underneath.
+         *
+         * The anchor is not the island itself for the primary unit: that island
+         * is the panel's centre box, whose parent is the panel, not uiGroup --
+         * and set_child_below_sibling() silently fails on a sibling that is not
+         * a child of the container, leaving the strip on top of everything.
+         * Its own chrome ancestor, panelBox, is the right anchor. A satellite
+         * island is a uiGroup child in its own right. */
+        Main.layoutManager.uiGroup.set_child_below_sibling(
+            edge, isPrimary ? Main.layoutManager.panelBox : island);
 
         edge.connect('notify::hover', () => {
             if (edge.hover) {
@@ -584,6 +600,26 @@ export default class DynamicIslandExtension extends Extension {
             window.maximized_horizontally &&
             window.maximized_vertically &&
             window.get_monitor() === monitor.index;
+    }
+
+    /* Collapses a burst of state changes into one decision. */
+    _queueSyncAutoHide() {
+        if (this._autoHideTimer)
+            GLib.Source.remove(this._autoHideTimer);
+
+        this._autoHideTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+            AUTOHIDE_SETTLE_MS, () => {
+                this._autoHideTimer = 0;
+                this._syncAutoHide();
+                return GLib.SOURCE_REMOVE;
+            });
+    }
+
+    _cancelSyncTimer() {
+        if (this._autoHideTimer) {
+            GLib.Source.remove(this._autoHideTimer);
+            this._autoHideTimer = 0;
+        }
     }
 
     _syncAutoHide() {
@@ -868,6 +904,12 @@ export default class DynamicIslandExtension extends Extension {
                 return;
 
             this._unguard(autohide?.AutoHide?.prototype, 'show',
+                self => self.dock?._monitor);
+            /* _checkOverlap() also returns "hide" outright on a fullscreen
+             * monitor, before it ever looks at where the pointer is. Left
+             * alone, a monitor that flickers into fullscreen slides the dock
+             * out and back repeatedly. */
+            this._unguard(autohide?.AutoHide?.prototype, '_checkOverlap',
                 self => self.dock?._monitor);
             this._unguard(dock?.Dock?.prototype, '_onMotionEvent',
                 self => self._monitor);
