@@ -64,6 +64,18 @@ const D2D_UUID = 'dash2dock-lite@icedman.github.com';
 const DOCK_ACTOR_NAME = 'dashtodockContainer';
 const PANEL_ACTOR_NAME = 'panelBox';
 
+/* Every actor this extension puts into the shell's chrome, by name. enable()
+ * sweeps these before building: a disable() that throws part way through leaves
+ * its actors behind, and an orphaned corner sits at full opacity with nothing
+ * driving it -- two black tabs hanging off the top of the screen that no amount
+ * of correct behaviour afterwards will remove. */
+const OWN_CHROME_NAMES = new Set([
+    'dynamicIslandRevealEdge',
+    'dynamicIslandSatellite',
+    'dynamicIslandCorner-left',
+    'dynamicIslandCorner-right',
+]);
+
 /* Timer surfaces. The two accents differ in lightness as well as hue, so the
  * running and paused states stay apart without relying on colour alone. */
 const RING_SIZE = 66;
@@ -93,6 +105,7 @@ export default class DynamicIslandExtension extends Extension {
         this._revealed = true;
         this._hideTimer = 0;
 
+        this._sweepOrphans();
         this._suspendBlurMyShellPanel();
         this._dropUnredirection();
         this._buildUnits();
@@ -230,6 +243,28 @@ export default class DynamicIslandExtension extends Extension {
         /* Let the shell re-decide what should be hidden now that it is back in
          * charge of fullscreen visibility. */
         Main.layoutManager._updateVisibility();
+    }
+
+    /* Nothing of ours should exist in the chrome before we build it. Anything
+     * that does is a leftover from an instance that failed to tear down. */
+    _sweepOrphans() {
+        let swept = 0;
+
+        for (const actor of Main.layoutManager.uiGroup.get_children()) {
+            if (!OWN_CHROME_NAMES.has(actor.name))
+                continue;
+
+            try {
+                Main.layoutManager.removeChrome(actor);
+            } catch (e) {
+                /* Not tracked as chrome; destroying it is still right. */
+            }
+            actor.destroy();
+            swept++;
+        }
+
+        if (swept > 0)
+            log(`dynamic-island: swept ${swept} orphaned actor(s)`);
     }
 
     _connect(obj, signal, cb) {
