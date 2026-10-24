@@ -1,0 +1,9 @@
+{
+  "uuid": "dynamic-island@EnzoFB06.github.com",
+  "name": "Dynamic Island",
+  "description": "Replaces the GNOME top bar with a floating macOS-style island: the clock and the control centre sit in a rounded pill at the top centre, the bar reserves no space so windows fill the screen, and hovering unfolds the island into a panel with media controls and a focus timer.",
+  "shell-version": ["50", "51"],
+  "url": "https://github.com/EnzoFB06/dynamic-island-gnome",
+  "settings-schema": "org.gnome.shell.extensions.dynamic-island",
+  "version": 1
+}

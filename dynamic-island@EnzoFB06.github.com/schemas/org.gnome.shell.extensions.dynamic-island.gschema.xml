@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <enum id="org.gnome.shell.extensions.dynamic-island.autohide">
+    <value value="0" nick="never"/>
+    <value value="1" nick="fullscreen"/>
+    <value value="2" nick="fullscreen-and-maximized"/>
+  </enum>
+
+  <enum id="org.gnome.shell.extensions.dynamic-island.style">
+    <value value="0" nick="notch"/>
+    <value value="1" nick="floating"/>
+  </enum>
+
+  <schema id="org.gnome.shell.extensions.dynamic-island"
+          path="/org/gnome/shell/extensions/dynamic-island/">
+
+    <key name="style" enum="org.gnome.shell.extensions.dynamic-island.style">
+      <default>'notch'</default>
+      <summary>Island shape</summary>
+      <description>"notch" sits flush with the top edge with rounded bottom corners; "floating" is a fully rounded pill detached from the edge.</description>
+    </key>
+
+    <key name="bg-opacity" type="d">
+      <default>0.92</default>
+      <range min="0.0" max="1.0"/>
+      <summary>Background opacity</summary>
+    </key>
+
+    <key name="corner-radius" type="i">
+      <default>18</default>
+      <range min="0" max="40"/>
+      <summary>Corner radius in pixels</summary>
+    </key>
+
+    <key name="island-height" type="i">
+      <default>30</default>
+      <range min="20" max="60"/>
+      <summary>Island height in pixels</summary>
+    </key>
+
+    <key name="top-gap" type="i">
+      <default>6</default>
+      <range min="0" max="40"/>
+      <summary>Gap above the island, floating style only</summary>
+    </key>
+
+    <key name="side-padding" type="i">
+      <default>10</default>
+      <range min="0" max="40"/>
+      <summary>Horizontal padding inside the island</summary>
+    </key>
+
+    <key name="reclaim-space" type="b">
+      <default>true</default>
+      <summary>Give the panel's reserved strip back to the windows</summary>
+      <description>On, windows fill the whole screen height and the island overlays them. Off, the panel reserves its height as GNOME normally does, so nothing is ever covered.</description>
+    </key>
+
+    <key name="hide-activities" type="b">
+      <default>true</default>
+      <summary>Hide the Activities button</summary>
+      <description>The overview is still reachable with the Super key.</description>
+    </key>
+
+
+    <key name="island-blur" type="b">
+      <default>false</default>
+      <summary>Frost the island with a background blur</summary>
+      <description>Uses Shell.BlurEffect in BACKGROUND mode. Lower the background opacity for the blur to show through.</description>
+    </key>
+
+    <key name="blur-radius" type="i">
+      <default>60</default>
+      <range min="0" max="200"/>
+      <summary>Blur radius</summary>
+    </key>
+
+    <key name="blur-brightness" type="d">
+      <default>0.6</default>
+      <range min="0.0" max="1.0"/>
+      <summary>Blur brightness</summary>
+    </key>
+
+
+    <key name="keep-in-fullscreen" type="b">
+      <default>true</default>
+      <summary>Keep the island visible over fullscreen windows</summary>
+      <description>GNOME registers the panel with trackFullscreen, so it normally hides whenever a window covers the whole monitor. This clears that flag for the panel only.</description>
+    </key>
+
+
+    <key name="fix-dock-fullscreen" type="b">
+      <default>true</default>
+      <summary>Let the dock reveal on hover over fullscreen windows</summary>
+      <description>dash2dock-lite refuses to slide in, and stops its render loop, whenever the monitor counts as fullscreen -- which a maximized window now does, since the panel no longer reserves space. This neutralises those guards for the duration of each call, without modifying that extension.</description>
+    </key>
+
+
+    <key name="autohide-mode" enum="org.gnome.shell.extensions.dynamic-island.autohide">
+      <default>'fullscreen'</default>
+      <summary>When the island should hide itself and wait for a hover</summary>
+      <description>Mirrors the macOS menu bar: "fullscreen" hides only over a genuinely fullscreen window, which is the only case macOS hides for. Mutter does not report a merely maximized window as fullscreen, however large it is, so "fullscreen-and-maximized" tests the window state directly.</description>
+    </key>
+
+    <key name="reveal-edge" type="i">
+      <default>20</default>
+      <range min="1" max="80"/>
+      <summary>Height in pixels of the strip at the top that brings the island back</summary>
+      <description>Roughly where the island itself sits, so the gesture is "move to the notch". Three pixels was unhittable with a mouse. It spans the island's width only and is reactive solely while the island is hidden, so the window buttons in the corners stay clickable.</description>
+    </key>
+
+    <key name="hide-delay" type="i">
+      <default>400</default>
+      <range min="0" max="3000"/>
+      <summary>Delay in milliseconds before the island slides away again</summary>
+    </key>
+
+    <key name="animation-duration" type="i">
+      <default>420</default>
+      <range min="0" max="2000"/>
+      <summary>Slide duration in milliseconds</summary>
+    </key>
+
+
+    <key name="expand-on-hover" type="b">
+      <default>true</default>
+      <summary>Bloom open into a panel when hovered</summary>
+      <description>The panel is a separate actor that opens beneath the island, because the panel's own centre box cannot grow past the panel height.</description>
+    </key>
+
+    <key name="expand-delay" type="i">
+      <default>500</default>
+      <range min="0" max="10000"/>
+      <summary>Delay in milliseconds before hovering opens the panel</summary>
+    </key>
+
+    <key name="shelf-width" type="i">
+      <default>380</default>
+      <range min="240" max="900"/>
+      <summary>Width of the expanded panel in pixels</summary>
+    </key>
+
+
+    <key name="all-monitors" type="b">
+      <default>true</default>
+      <summary>Put an island on every monitor</summary>
+      <description>The shell has a single panel, so only the primary monitor can host the real clock and control centre. Secondary monitors get a matching island showing the time, with the same hover behaviour.</description>
+    </key>
+
+    <key name="reveal-margin" type="i">
+      <default>16</default>
+      <range min="0" max="200"/>
+      <summary>Extra width on each side of the hover strip</summary>
+      <description>The strip spans the island's width plus this margin, instead of the whole screen, so the window buttons in the top corners stay reachable.</description>
+    </key>
+
+
+    <key name="focus-duration" type="i">
+      <default>25</default>
+      <range min="1" max="180"/>
+      <summary>Length of a focus session, in minutes</summary>
+    </key>
+
+    <key name="concave-corners" type="b">
+      <default>true</default>
+      <summary>Flare the island's top corners into the screen edge</summary>
+      <description>The curve is concave, which border-radius cannot express, so each corner is a small St.DrawingArea filled with Cairo and kept in step with the island as it grows.</description>
+    </key>
+
+
+    <key name="ring-dots" type="i">
+      <default>12</default>
+      <range min="4" max="60"/>
+      <summary>Number of dots around the timer ring</summary>
+      <description>Each dot stands for the session length divided by this count, and goes dark once its share has elapsed. A fixed count rather than one dot per minute, so the ring stays readable at any duration.</description>
+    </key>
+
+    <key name="duration-step" type="i">
+      <default>5</default>
+      <range min="1" max="30"/>
+      <summary>Minutes added or removed by the plus and minus buttons</summary>
+      <description>Scrolling on the ring always moves by a single minute, for fine adjustment.</description>
+    </key>
+
+  </schema>
+</schemalist>

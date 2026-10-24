@@ -1,0 +1,225 @@
+/* The panel's own surface.
+ *
+ * This lives here rather than in an inline style on purpose. Blur My Shell owns
+ * panel.set_style() -- it rewrites it on every overview transition -- so an
+ * inline style of ours is wiped the moment you leave the overview, and the
+ * theme's "#panel { background-color: #131313 !important }" takes the panel
+ * back as a solid black band. An extension stylesheet loads after the theme,
+ * and an !important author rule outranks a non-important inline one, so this
+ * wins without ever touching the property Blur My Shell manages. */
+#panel {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+/* The island is the panel's centre box. Its geometry (radius, padding,
+ * background) is applied inline from the settings; this file carries the
+ * light-on-dark treatment for the indicators that now sit inside it.
+ *
+ * These selectors are deliberately deeper than the theme's own
+ * "#panel .panel-button" rules so they win without needing !important. */
+
+#panel #panelCenter {
+  spacing: 4px;
+}
+
+#panel #panelCenter .panel-button {
+  color: #ffffff;
+  border: 0;
+  background-color: transparent;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 100px transparent;
+  -natural-hpadding: 8px;
+  -minimum-hpadding: 5px;
+}
+
+#panel #panelCenter .panel-button:focus,
+#panel #panelCenter .panel-button:hover {
+  box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.14);
+}
+
+#panel #panelCenter .panel-button:active,
+#panel #panelCenter .panel-button:checked {
+  box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.24);
+}
+
+#panel #panelCenter .panel-button .system-status-icon {
+  color: #ffffff;
+  icon-size: 1.0em;
+  padding: 0 1px;
+  margin: 0 1px;
+}
+
+#panel #panelCenter .panel-button .panel-status-indicators-box {
+  spacing: 2px;
+}
+
+#panel #panelCenter .panel-button .panel-status-indicators-box > .system-status-icon {
+  padding: 0;
+}
+
+/* The clock itself stays flat; the hover highlight rides on its inner label so
+ * it does not fight the island's own rounded background. */
+#panel #panelCenter .panel-button.clock-display {
+  background: none !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+#panel #panelCenter .panel-button.clock-display .clock {
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 0 4px;
+}
+
+#panel #panelCenter .panel-button.clock-display:focus .clock,
+#panel #panelCenter .panel-button.clock-display:hover .clock {
+  box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.14);
+}
+
+#panel #panelCenter .panel-button.clock-display:active .clock,
+#panel #panelCenter .panel-button.clock-display:checked .clock {
+  box-shadow: inset 0 0 0 100px rgba(255, 255, 255, 0.24);
+}
+
+#panel #panelCenter .panel-button.clock-display .messages-indicator {
+  icon-size: 1.0em;
+}
+
+/* ---------------------------------------------------------------- shelf ---
+ * The expanded panel. It is a separate top-chrome actor rather than a taller
+ * island, because Panel.vfunc_allocate() pins the centre box to the panel's
+ * height and would clip anything bigger. */
+/* The unfolded content sits inside the pill itself, so it draws no surface of
+ * its own -- no background, no corners, no shadow. The island is one shape. */
+#dynamicIslandExpanded {
+  padding: 12px 4px 14px 4px;
+  spacing: 12px;
+  color: #ffffff;
+}
+
+#dynamicIslandExpanded .di-cover {
+  min-width: 64px;
+  min-height: 64px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.08);
+  /* "contain", not "cover": the theme itself uses contain in 27 places, so St
+   * demonstrably supports it, and album art is square anyway -- the two are
+   * identical here, and contain never crops a non-square cover. */
+  background-size: contain;
+}
+
+#dynamicIslandExpanded .di-title {
+  font-weight: bold;
+  font-size: 1.05em;
+  color: #ffffff;
+}
+
+#dynamicIslandExpanded .di-artist {
+  font-size: 0.9em;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+#dynamicIslandExpanded .di-empty {
+  font-size: 0.95em;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#dynamicIslandExpanded .di-controls {
+  spacing: 6px;
+}
+
+#dynamicIslandExpanded .di-button {
+  border-radius: 999px;
+  padding: 7px;
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.08);
+  transition-duration: 150ms;
+}
+
+#dynamicIslandExpanded .di-button:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+#dynamicIslandExpanded .di-button:active {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+#dynamicIslandExpanded .di-button:insensitive {
+  color: rgba(255, 255, 255, 0.3);
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* The clock on a satellite island. The shell has a single panel, so monitors
+ * other than the primary get this instead of the real dateMenu. */
+#dynamicIslandSatellite .di-satellite-clock {
+  color: #ffffff;
+  font-weight: bold;
+  padding: 0 6px;
+}
+
+/* The focus timer. Its ring is drawn with Cairo, so only the text and the
+ * controls are styled here. */
+#dynamicIslandExpanded .di-timer {
+  margin-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 12px;
+}
+
+#dynamicIslandExpanded .di-timer-time {
+  font-size: 0.95em;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+#dynamicIslandExpanded .di-timer-state {
+  font-size: 0.95em;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+#dynamicIslandExpanded .di-timer-hint {
+  font-size: 0.82em;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+#dynamicIslandExpanded .di-button-accent {
+  background-color: #6aa9e0;
+  color: #0b0b0d;
+}
+
+#dynamicIslandExpanded .di-button-accent:hover {
+  background-color: #7fb6e6;
+}
+
+/* The running-session dot beside the clock. Its colour is set from the code,
+ * because it carries the state. */
+#dynamicIslandTopRow .di-dot {
+  border-radius: 999px;
+  margin-right: 7px;
+}
+
+/* The duration stepper, inside the island beside the ring. */
+#dynamicIslandExpanded .di-stepper {
+  spacing: 5px;
+  padding-top: 2px;
+}
+
+#dynamicIslandExpanded .di-step {
+  border-radius: 999px;
+  padding: 3px;
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.1);
+  transition-duration: 150ms;
+}
+
+#dynamicIslandExpanded .di-step:hover {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+
+/* Dimmed while a session is under way: the length is fixed once it starts. */
+#dynamicIslandExpanded .di-step:insensitive {
+  color: rgba(255, 255, 255, 0.28);
+  background-color: rgba(255, 255, 255, 0.04);
+}

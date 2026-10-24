@@ -1,0 +1,3 @@
+# Compiled from the .xml at install time; never commit the binary.
+*/schemas/gschemas.compiled
+*.shell-extension.zip
