@@ -223,3 +223,77 @@
   color: rgba(255, 255, 255, 0.28);
   background-color: rgba(255, 255, 255, 0.04);
 }
+
+/* ---------------------------------------------------------------- panes ---
+ * One pane at a time, the wheel moves between them. The footer carries the
+ * position: a row of dots, the active one stretched into a short bar, with the
+ * pane's name beside it fading back once you have landed. */
+#dynamicIslandExpanded .di-pane-footer {
+  spacing: 8px;
+  padding: 8px 0 0 0;
+}
+
+#dynamicIslandExpanded .di-pane-name {
+  font-size: 0.72em;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+#dynamicIslandExpanded .di-pane-dots {
+  spacing: 5px;
+}
+
+/* The height is the dot's diameter; the width is animated, so it is left to
+ * the actor and only the radius is kept large enough to round either shape. */
+#dynamicIslandExpanded .di-pane-dot {
+  height: 5px;
+  border-radius: 999px;
+}
+
+/* --------------------------------------------------------------- system ---
+ * Three rings and a throughput column. The rings read as a family with the
+ * focus timer -- same stroke weight, same dark track -- but each metric keeps
+ * its own hue so a glance tells them apart without reading the captions. */
+#dynamicIslandExpanded .di-system {
+  spacing: 10px;
+  padding: 2px 6px;
+}
+
+#dynamicIslandExpanded .di-gauge {
+  spacing: 3px;
+}
+
+#dynamicIslandExpanded .di-gauge-value {
+  font-size: 0.95em;
+  font-weight: bold;
+  font-feature-settings: "tnum";
+  color: #ffffff;
+}
+
+#dynamicIslandExpanded .di-gauge-caption {
+  font-size: 0.65em;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+#dynamicIslandExpanded .di-system-side {
+  spacing: 3px;
+}
+
+#dynamicIslandExpanded .di-system-rate {
+  spacing: 5px;
+  font-size: 0.78em;
+  font-feature-settings: "tnum";
+  color: rgba(255, 255, 255, 0.85);
+}
+
+#dynamicIslandExpanded .di-system-rate StIcon {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+#dynamicIslandExpanded .di-system-uptime {
+  font-size: 0.7em;
+  color: rgba(255, 255, 255, 0.45);
+  padding-top: 2px;
+}

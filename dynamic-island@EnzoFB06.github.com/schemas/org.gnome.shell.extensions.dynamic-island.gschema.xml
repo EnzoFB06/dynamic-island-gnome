@@ -134,6 +134,14 @@
       <summary>Delay in milliseconds before hovering opens the panel</summary>
     </key>
 
+    <!-- Which pane the expanded island reopens on. Written as you scroll, so
+         it is deliberately not in WATCHED_KEYS: a pane change must not trigger
+         a rebuild of the island it happens inside. -->
+    <key name="active-pane" type="s">
+      <default>'media'</default>
+      <summary>Pane shown when the island unfolds</summary>
+    </key>
+
     <key name="shelf-width" type="i">
       <default>380</default>
       <range min="240" max="900"/>

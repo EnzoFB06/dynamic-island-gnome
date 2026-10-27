@@ -37,6 +37,9 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Mpris from 'resource:///org/gnome/shell/ui/mpris.js';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 
+import {PaneDeck} from './panes.js';
+import {SystemPane} from './system.js';
+
 /* Indicators gathered into the island, in display order. */
 const ISLAND_ROLES = ['dateMenu', 'quickSettings'];
 
@@ -1026,6 +1029,25 @@ export default class DynamicIslandExtension extends Extension {
             orientation: Clutter.Orientation.VERTICAL,
             opacity: 0,
             visible: false,
+            reactive: true,
+        });
+
+        /* The wheel moves between panes. Reactive children are picked through a
+         * non-reactive parent, so this costs the panel nothing: clicks still
+         * fall through to the window underneath everywhere else. A pane that
+         * scrolls on its own -- the search results, the timer ring -- consumes
+         * the event first and keeps it. */
+        this._expandedBox.connect('scroll-event', (_actor, event) => {
+            const direction = event.get_scroll_direction();
+
+            if (direction === Clutter.ScrollDirection.DOWN)
+                this._deck?.cycle(+1);
+            else if (direction === Clutter.ScrollDirection.UP)
+                this._deck?.cycle(-1);
+            else
+                return Clutter.EVENT_PROPAGATE;
+
+            return Clutter.EVENT_STOP;
         });
         /* Clipped so the unfolding content never spills past the pill while it
          * is still growing. */
@@ -1039,10 +1061,45 @@ export default class DynamicIslandExtension extends Extension {
         this._buildCorners();
     }
 
+    /* The expanded island shows one pane at a time and the wheel moves between
+     * them. What used to be stacked in the shelf all at once -- the player and
+     * the timer together -- is now one pane each, so the island takes the height
+     * of whatever is up rather than the height of the tallest thing it holds. */
     _buildExpandedContent() {
+        this._deck = new PaneDeck({onChanged: () => this._onPaneChanged()});
+        this._expandedBox.add_child(this._deck.actor);
+
+        this._deck.add({id: 'media', name: 'Lecture', actor: this._buildMediaPane()});
+        this._deck.add({id: 'focus', name: 'Focus', actor: this._buildTimer()});
+
+        this._systemPane = new SystemPane();
+        this._deck.add({
+            id: 'system',
+            name: 'Système',
+            actor: this._systemPane.actor,
+            onShow: () => this._systemPane?.start(),
+            onHide: () => this._systemPane?.stop(),
+            onDestroy: () => {
+                this._systemPane?.destroy();
+                this._systemPane = null;
+            },
+        });
+
+        /* Reopens on the pane you left, across a lock screen or a restart. */
+        const saved = this._settings.get_string('active-pane');
+        if (this._deck.has(saved))
+            this._deck.activate(saved, {animate: false});
+    }
+
+    _buildMediaPane() {
+        const pane = new St.BoxLayout({
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true,
+        });
+
         const row = new St.BoxLayout({style_class: 'di-row'});
         this._mediaRow = row;
-        this._expandedBox.add_child(row);
+        pane.add_child(row);
 
         this._cover = new St.Widget({style_class: 'di-cover'});
         row.add_child(this._cover);
@@ -1079,9 +1136,46 @@ export default class DynamicIslandExtension extends Extension {
             style_class: 'di-empty',
             x_align: Clutter.ActorAlign.CENTER,
         });
-        this._expandedBox.add_child(this._emptyLabel);
+        pane.add_child(this._emptyLabel);
 
-        this._buildTimer();
+        return pane;
+    }
+
+    /* A pane change is a height change, and the island is one shape: the panel's
+     * height, the pill's width and the concave corners all follow from the same
+     * numbers. So the deck only reports the switch; the geometry is driven from
+     * here, through the same stepped animation as the unfolding itself. */
+    _onPaneChanged() {
+        if (!this._expanded || !this._expandedBox)
+            return;
+
+        this._settings.set_string('active-pane', this._deck.activeId);
+
+        const width = this._expandedBox.width;
+        const fromHeight = this._expandedBox.height;
+        const toHeight = this._measureExpandedHeight(width);
+
+        if (toHeight === fromHeight)
+            return;
+
+        this._animateGeometry(width, width, fromHeight, toHeight,
+            Math.round(this._settings.get_int('animation-duration') * 0.8),
+            Clutter.AnimationMode.EASE_OUT_CUBIC);
+    }
+
+    /* set_size() pins the box, and a pinned box reports its pinned height as its
+     * preferred one -- asking it how tall it wants to be while it is held at 240
+     * px answers 240. Release it, ask, pin it straight back: nothing is
+     * allocated in between, so the release is never drawn. */
+    _measureExpandedHeight(forWidth) {
+        const width = this._expandedBox.width;
+        const height = this._expandedBox.height;
+
+        this._expandedBox.set_size(-1, -1);
+        const [, natural] = this._expandedBox.get_preferred_height(forWidth);
+        this._expandedBox.set_size(width, height);
+
+        return natural;
     }
 
     /* ----------------------------------------------------------- corners */
@@ -1219,7 +1313,6 @@ export default class DynamicIslandExtension extends Extension {
             style_class: 'di-timer',
             x_expand: true,
         });
-        this._expandedBox.add_child(row);
 
         /* The ring and its label share one cell: the ring is drawn, the time
          * sits on top of it. */
@@ -1305,6 +1398,8 @@ export default class DynamicIslandExtension extends Extension {
         buttons.add_child(reset);
 
         this._syncTimer();
+
+        return row;
     }
 
     _stepperButton(iconName, sign) {
@@ -1497,6 +1592,11 @@ export default class DynamicIslandExtension extends Extension {
         this._timerLabel = null;
         this._timerDot = null;
         this._ring = null;
+
+        /* Before the subtree goes: the panes own timers and watchers of their
+         * own, and a destroyed actor does not stop a GLib source. */
+        this._deck?.destroy();
+        this._deck = null;
 
         /* The indicators have to be out before this subtree goes, or they are
          * destroyed along with it. */
