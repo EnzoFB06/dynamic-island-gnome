@@ -240,14 +240,17 @@
   color: rgba(255, 255, 255, 0.75);
 }
 
+/* A column against the right edge rather than a row underneath: the wheel
+ * moves vertically and so do the panes, so the indicator does too. */
 #dynamicIslandExpanded .di-pane-dots {
   spacing: 5px;
+  padding: 0 2px 0 8px;
 }
 
-/* The height is the dot's diameter; the width is animated, so it is left to
+/* The width is the dot's diameter; the height is animated, so it is left to
  * the actor and only the radius is kept large enough to round either shape. */
 #dynamicIslandExpanded .di-pane-dot {
-  height: 5px;
+  width: 6px;
   border-radius: 999px;
 }
 

@@ -75,13 +75,17 @@ def main():
         pass
 
     record["session_id"] = session
-    record["label"] = label_for(payload)
+    # Set once, not on every event. A session's working directory moves around
+    # as it works -- one `cd` and the robot would be relabelled mid-task -- so
+    # the name it was started in is the one that identifies it.
+    record.setdefault("label", label_for(payload))
     record["updated"] = int(time.time())
     record.setdefault("subagents", 0)
 
     tool = payload.get("tool_name") or ""
 
     if event == "SessionStart":
+        record["label"] = label_for(payload)
         record["state"] = "idle"
         record["tool"] = ""
         record["subagents"] = 0

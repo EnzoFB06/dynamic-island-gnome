@@ -55,8 +55,11 @@ the panel's height, so the panel's height is what grows, and the content is stac
 inside the island.
 
 The expanded panel is a **deck of panes**, one at a time, and the wheel moves
-between them. A row of dots at the bottom carries the position, with the pane's
-name beside it fading back once you have landed. The island takes the size of
+between them, each one rising or descending into place as it fades, from the
+side the wheel came from. A column of dots down the right edge carries the
+position -- the wheel moves vertically, the panes move vertically, the indicator
+agrees with both -- and the pane's name appears underneath, fading back once you
+have landed. The island takes the size of
 whichever pane is up -- height always, and width when a pane asks for more --
 so each one gets the room it needs rather than the room the largest one needs.
 

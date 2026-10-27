@@ -16,8 +16,8 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import St from 'gi://St';
 
-const DOT_SIZE = 5;
-const DOT_ACTIVE_WIDTH = 14;
+const DOT_SIZE = 6;
+const DOT_ACTIVE_LENGTH = 14;
 const DOT_FADE_MS = 160;
 
 /* How far the arriving pane travels. Translation, not layout: it moves the
@@ -41,24 +41,33 @@ export class PaneDeck {
         this._fadeDuration = fadeDuration;
         this._nameTimer = 0;
 
+        /* The deck runs down the island, so its position indicator runs down
+         * the side of it: a column of dots against the right edge, the active
+         * one stretched into a short bar. The wheel moves vertically, the panes
+         * move vertically, and the indicator agrees with both. */
         this.actor = new St.BoxLayout({
             name: 'dynamicIslandPanes',
+            x_expand: true,
+        });
+
+        this._main = new St.BoxLayout({
             orientation: Clutter.Orientation.VERTICAL,
             x_expand: true,
         });
+        this.actor.add_child(this._main);
 
         this._deck = new St.Widget({
             layout_manager: new Clutter.BinLayout(),
             x_expand: true,
         });
-        this.actor.add_child(this._deck);
+        this._main.add_child(this._deck);
 
         this._footer = new St.BoxLayout({
             style_class: 'di-pane-footer',
             x_align: Clutter.ActorAlign.CENTER,
             x_expand: true,
         });
-        this.actor.add_child(this._footer);
+        this._main.add_child(this._footer);
 
         this._nameLabel = new St.Label({
             style_class: 'di-pane-name',
@@ -73,9 +82,10 @@ export class PaneDeck {
 
         this._dots = new St.BoxLayout({
             style_class: 'di-pane-dots',
+            orientation: Clutter.Orientation.VERTICAL,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        this._footer.add_child(this._dots);
+        this.actor.add_child(this._dots);
     }
 
     /* A pane is {id, name, actor} plus optional onShow/onHide, called when it
@@ -87,7 +97,7 @@ export class PaneDeck {
         this._deck.add_child(pane.actor);
 
         pane.dot = new St.Widget({style_class: 'di-pane-dot'});
-        pane.dot.set_size(DOT_SIZE, DOT_SIZE);
+        pane.dot.height = DOT_SIZE;
         this._dots.add_child(pane.dot);
 
         this._panes.push(pane);
@@ -224,13 +234,13 @@ export class PaneDeck {
             const isActive = pane.id === this._activeId;
             pane.dot.remove_all_transitions();
             pane.dot.ease({
-                width: isActive ? DOT_ACTIVE_WIDTH : DOT_SIZE,
+                height: isActive ? DOT_ACTIVE_LENGTH : DOT_SIZE,
                 duration: DOT_FADE_MS,
                 mode: Clutter.AnimationMode.EASE_OUT_QUAD,
             });
             pane.dot.set_style(isActive
-                ? 'background-color: rgba(255, 255, 255, 0.92);'
-                : 'background-color: rgba(255, 255, 255, 0.28);');
+                ? 'background-color: rgba(255, 255, 255, 0.95);'
+                : 'background-color: rgba(255, 255, 255, 0.38);');
         }
     }
 
@@ -277,6 +287,7 @@ export class PaneDeck {
 
         this.actor?.destroy();
         this.actor = null;
+        this._main = null;
         this._deck = null;
         this._footer = null;
         this._dots = null;
