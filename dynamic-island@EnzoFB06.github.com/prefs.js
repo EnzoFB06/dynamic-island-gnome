@@ -170,6 +170,24 @@ export default class DynamicIslandPreferences extends ExtensionPreferences {
             0, 30000);
         events.add(compact);
 
+        const replace = new Adw.SwitchRow({
+            title: 'Remplacer les banni\u00e8res de GNOME',
+            subtitle: 'Sans \u00e7a, la banni\u00e8re du shell se dessine par-dessus la capsule, '
+                + 'au m\u00eame endroit et avec le m\u00eame texte.',
+        });
+        settings.bind('replace-banners', replace, 'active',
+            Gio.SettingsBindFlags.DEFAULT);
+        events.add(replace);
+
+        const sounds = new Adw.SwitchRow({
+            title: 'Son',
+            subtitle: 'Bloquer les banni\u00e8res les rend muettes : c’est la capsule qui '
+                + 'porte le son. Suit le r\u00e9glage sonore du bureau.',
+        });
+        settings.bind('event-sounds', sounds, 'active',
+            Gio.SettingsBindFlags.DEFAULT);
+        events.add(sounds);
+
         const inFullscreen = new Adw.SwitchRow({
             title: 'Aussi en plein \u00e9cran',
             subtitle: 'La capsule est d\u00e9tach\u00e9e de l\u2019encoche et ne se cache '
@@ -182,7 +200,7 @@ export default class DynamicIslandPreferences extends ExtensionPreferences {
         /* The per-kind switches say nothing while the whole feature is off. */
         const syncEvents = () => {
             const on = settings.get_boolean('event-capsules');
-            for (const row of [...rows, dwell, compact, inFullscreen])
+            for (const row of [...rows, dwell, compact, replace, sounds, inFullscreen])
                 row.sensitive = on;
         };
         settings.connect('changed::event-capsules', syncEvents);

@@ -180,6 +180,22 @@
     <!-- The capsule is its own chrome actor now and does not hide with the
          island, so this is about fullscreen windows alone. True by default:
          a notification you cannot see is a notification you have missed. -->
+    <!-- The capsule replaces the shell's banner rather than joining it;
+         without this the two are drawn over each other, in the same corner,
+         saying the same thing. Blocking is applied only while the capsule
+         would actually show notifications. -->
+    <key name="replace-banners" type="b">
+      <default>true</default>
+      <summary>Use the capsule instead of GNOME's own notification banner</summary>
+    </key>
+
+    <!-- Blocking the banners silences them too, since MessageTray plays a
+         notification's sound as it shows one. -->
+    <key name="event-sounds" type="b">
+      <default>true</default>
+      <summary>Play a sound with each capsule</summary>
+    </key>
+
     <key name="events-in-fullscreen" type="b">
       <default>true</default>
       <summary>Show capsules over fullscreen windows</summary>

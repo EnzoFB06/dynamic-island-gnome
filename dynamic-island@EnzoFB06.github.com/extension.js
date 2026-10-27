@@ -34,6 +34,7 @@ import Shell from 'gi://Shell';
 import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import * as Mpris from 'resource:///org/gnome/shell/ui/mpris.js';
 import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -97,6 +98,17 @@ const COVER_MAX_BYTES = 5 * 1024 * 1024;
  * behind the timer event and would say the same thing twice. */
 const TIMER_ECHO_MS = 1500;
 const EVENT_QUEUE_MAX = 3;
+
+/* Freedesktop sound theme names, all present in the stock theme. There is no
+ * entry the desktop plays for "a timer you set has run out", so the alarm is
+ * the nearest honest one. */
+const EVENT_SOUNDS = {
+    notification: 'message',
+    charging: 'power-plug',
+    unplugged: 'power-unplug',
+    bluetooth: 'device-added',
+    timer: 'alarm-clock-elapsed',
+};
 
 const ACCENT_RUNNING = '#6aa9e0';
 const ACCENT_PAUSED = '#e8a44c';
@@ -231,6 +243,12 @@ export default class DynamicIslandExtension extends Extension {
             enabledFor: kind => this._eventKindEnabled(kind),
         });
         this._events.start();
+
+        this._soundSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.sound'});
+        this._syncBannerBlocking();
+
+        for (const key of ['replace-banners', 'event-capsules', 'events-notifications'])
+            this._connect(this._settings, `changed::${key}`, () => this._syncBannerBlocking());
     }
 
     _onAgentsChanged(agents) {
@@ -274,6 +292,8 @@ export default class DynamicIslandExtension extends Extension {
         this._cancelExpandTimer();
         this._events?.stop();
         this._events = null;
+        this._restoreBanners();
+        this._soundSettings = null;
         this._agents?.stop();
         this._agents = null;
         this._eventQueue = [];
@@ -1702,8 +1722,7 @@ export default class DynamicIslandExtension extends Extension {
                     this._syncTimer();
                     const minutes = this._settings.get_int('focus-duration');
                     this._events?.emitTimerDone(`${minutes} min de focus`);
-                    Main.notify('Session de focus terminee',
-                        `${minutes} minutes de focus.`);
+                    this._postTimerNotification(minutes);
                     return GLib.SOURCE_REMOVE;
                 }
 
@@ -1712,6 +1731,29 @@ export default class DynamicIslandExtension extends Extension {
         }
 
         this._syncTimer();
+    }
+
+    /* Main.notify() marks everything it posts transient, and a transient
+     * notification is shown and then discarded -- which is why a finished
+     * session left nothing in the message list. Posted by hand instead, so it
+     * is still there when you come back to the machine.
+     *
+     * Our own capsule has already announced it; the echo guard in _onEvent()
+     * keeps this from being announced a second time. */
+    _postTimerNotification(minutes) {
+        try {
+            const source = MessageTray.getSystemSource();
+            const notification = new MessageTray.Notification({
+                source,
+                title: 'Session de focus terminée',
+                body: `${minutes} minutes de focus.`,
+                gicon: new Gio.ThemedIcon({name: 'alarm-symbolic'}),
+                isTransient: false,
+            });
+            source.addNotification(notification);
+        } catch (e) {
+            logError(e, 'dynamic-island: could not post the focus notification');
+        }
     }
 
     _timerStop() {
@@ -2038,6 +2080,86 @@ export default class DynamicIslandExtension extends Extension {
          * never share the screen. */
         this._yieldIsland();
         this._capsule.show(event, {ringDots: this._settings.get_int('ring-dots')});
+        this._playEventSound(event.kind);
+
+        /* The capsule is this notification's banner, so it counts as seen.
+         * MessageTray does this itself when it shows one; with its banners
+         * blocked, nothing else will, and the unread badge on the clock would
+         * keep climbing for notifications you have already read. */
+        try {
+            if (event.notification && !event.notification._destroyed)
+                event.notification.acknowledged = true;
+        } catch (e) {
+            /* Destroyed between the queue and here. */
+        }
+    }
+
+    /* Blocking the shell's banners silences them as well: MessageTray plays a
+     * notification's sound from _updateShowingNotification(), which no longer
+     * runs. So the capsule carries the sound, for every kind -- there was none
+     * at all for a finished focus session, which had no banner to begin with. */
+    _playEventSound(kind) {
+        if (!this._settings.get_boolean('event-sounds'))
+            return;
+
+        /* The desktop's own master switch for interface sounds outranks ours. */
+        if (!this._soundSettings?.get_boolean('event-sounds'))
+            return;
+
+        const name = EVENT_SOUNDS[kind];
+        if (!name)
+            return;
+
+        try {
+            global.display.get_sound_player()
+                .play_from_theme(name, 'Dynamic Island', null);
+        } catch (e) {
+            logError(e, 'dynamic-island: could not play the event sound');
+        }
+    }
+
+    /* The capsule replaces the shell's banner rather than joining it. Without
+     * this the two are drawn over each other -- GNOME's own banner lands on top
+     * of the capsule, in the same corner of the screen, saying the same thing.
+     *
+     * Only while the capsule is actually going to show the notification: with
+     * capsules off, or notifications off, blocking banners would leave no
+     * notification UI at all. */
+    _syncBannerBlocking() {
+        const tray = Main.messageTray;
+        if (!tray)
+            return;
+
+        const block = this._settings.get_boolean('replace-banners') &&
+            this._settings.get_boolean('event-capsules') &&
+            this._settings.get_boolean('events-notifications');
+
+        if (block === !!this._bannersBlocked)
+            return;
+
+        if (block) {
+            /* MessageTray declares a setter for this and no getter, so the
+             * public name reads back as undefined. The backing field is the
+             * only way to learn what it was before we touched it. */
+            this._bannerBlockedBackup = tray._bannerBlocked ?? false;
+            tray.bannerBlocked = true;
+        } else {
+            tray.bannerBlocked = this._bannerBlockedBackup ?? false;
+        }
+
+        this._bannersBlocked = block;
+    }
+
+    _restoreBanners() {
+        if (!this._bannersBlocked)
+            return;
+
+        try {
+            Main.messageTray.bannerBlocked = this._bannerBlockedBackup ?? false;
+        } catch (e) {
+            /* Tray already gone. */
+        }
+        this._bannersBlocked = false;
     }
 
     _yieldIsland() {

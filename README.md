@@ -110,6 +110,14 @@ The capsule plays in three acts, after
    have stopped reading;
 3. **away** — it lifts, shrinks and fades.
 
+The capsule **replaces** the shell's banner rather than joining it: without
+that the two are drawn over each other, in the same corner, saying the same
+thing. Blocking GNOME's banners also silences them -- MessageTray plays a
+notification's sound as it shows one -- so the capsule carries the sound
+itself, from the freedesktop theme, following the desktop's own switch for
+interface sounds. A finished focus session had no banner to begin with and so
+had never made a sound at all.
+
 Hovering holds whichever act it is in; clicking activates the notification the
 way clicking the shell's own banner does. Events queue rather than overwrite,
 and the capsule shows exactly the set the shell would have bannered -- the same
