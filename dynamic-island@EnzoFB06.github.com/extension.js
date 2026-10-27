@@ -40,6 +40,8 @@ import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extension
 import {PaneDeck} from './panes.js';
 import {SystemPane} from './system.js';
 import {EventCapsule, EventKind, EventMonitor, motifFor} from './events.js';
+import {SearchPane} from './search.js';
+import {AgentStrip, AgentsPane, AgentWatcher} from './agents.js';
 
 /* Indicators gathered into the island, in display order. */
 const ISLAND_ROLES = ['dateMenu', 'quickSettings'];
@@ -199,12 +201,26 @@ export default class DynamicIslandExtension extends Extension {
          * outlives every rebuild _apply() does and is torn down only in
          * disable(). Whether an event is worth showing is decided when it
          * arrives, from the settings, so the toggles are live. */
+        /* One robot per Claude Code session. The extension cannot see inside
+         * Claude Code, so the shipped hook reports to a state directory and
+         * this watches it -- which means the feature works with no hook
+         * installed too: it simply has nothing to draw. */
+        this._agents = new AgentWatcher({
+            onChanged: agents => this._onAgentsChanged(agents),
+        });
+        this._agents.start();
+
         this._eventQueue = [];
         this._events = new EventMonitor({
             onEvent: event => this._onEvent(event),
             enabledFor: kind => this._eventKindEnabled(kind),
         });
         this._events.start();
+    }
+
+    _onAgentsChanged(agents) {
+        this._agentStrip?.update(agents);
+        this._agentsPane?.update(agents, {hookInstalled: this._agents?.dirExists});
     }
 
     _eventKindEnabled(kind) {
@@ -244,6 +260,8 @@ export default class DynamicIslandExtension extends Extension {
         this._cancelCapsuleTimer();
         this._events?.stop();
         this._events = null;
+        this._agents?.stop();
+        this._agents = null;
         this._eventQueue = [];
         this._teardownMpris();
         this._untrackFocusWindow();
@@ -795,24 +813,40 @@ export default class DynamicIslandExtension extends Extension {
         const timeline = new Clutter.Timeline({duration, actor: this._expandedBox});
         timeline.set_progress_mode(mode);
 
+        /* Clutter emits 'stopped' for an explicit stop() just as it does for a
+         * natural end, and the two mean opposite things here. A collapse that
+         * is cut short by an expand must NOT run its completion: that
+         * completion hides the expanded box and drops its size pin, and it
+         * would land after the expand has already shown and sized it. The
+         * island then sits at full height with nothing in it, pinned to the
+         * collapsed width -- because a hidden child contributes no preferred
+         * width to the box above it. */
+        let cancelled = false;
+
         timeline.connect('new-frame', () => apply(timeline.get_progress()));
         timeline.connect('stopped', () => {
-            this._geometryTimeline = null;
+            if (cancelled)
+                return;
+
+            this._geometry = null;
             apply(1);
             onDone?.();
         });
 
-        this._geometryTimeline = timeline;
+        this._geometry = {timeline, cancel: () => (cancelled = true)};
         timeline.start();
     }
 
     _stopGeometry() {
-        if (this._geometryTimeline) {
-            const timeline = this._geometryTimeline;
-            this._geometryTimeline = null;
-            timeline.stop();
-            timeline.run_dispose();
-        }
+        if (!this._geometry)
+            return;
+
+        const {timeline, cancel} = this._geometry;
+        this._geometry = null;
+
+        cancel();
+        timeline.stop();
+        timeline.run_dispose();
     }
 
     _animateUnit(unit, translationY, opacity) {
@@ -833,7 +867,8 @@ export default class DynamicIslandExtension extends Extension {
 
     _queueHideUnit(unit) {
         this._cancelHideTimer(unit);
-        if (!this._shouldAutoHide(unit) || this._anyMenuOpen() || this._capsuleShown)
+        if (!this._shouldAutoHide(unit) || this._anyMenuOpen() ||
+            this._capsuleShown || this._searchPane?.hasGrab)
             return;
 
         unit.hideTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
@@ -1102,7 +1137,12 @@ export default class DynamicIslandExtension extends Extension {
 
         this._buildExpandedContent();
         this._buildTimerDot();
+        this._buildAgentStrip();
         this._buildCorners();
+
+        /* _apply() rebuilds this subtree on a settings change, which leaves the
+         * new strip and pane empty until the next hook fires. Ask again. */
+        this._agents?.rescan();
     }
 
     /* The expanded island shows one pane at a time and the wheel moves between
@@ -1123,6 +1163,43 @@ export default class DynamicIslandExtension extends Extension {
         this._deck.add({id: 'focus', name: 'Focus', actor: this._buildTimer()});
 
         this._systemPane = new SystemPane();
+        this._agentsPane = new AgentsPane({
+            onHeightChange: () => this._morphToContentHeight(),
+        });
+        this._deck.add({
+            id: 'agents',
+            name: 'Agents',
+            actor: this._agentsPane.actor,
+            onShow: () => this._agentsPane?.setVisible(true),
+            onHide: () => this._agentsPane?.setVisible(false),
+            onDestroy: () => {
+                this._agentsPane?.destroy();
+                this._agentsPane = null;
+            },
+        });
+
+        this._searchPane = new SearchPane({
+            onHeightChange: () => this._morphToContentHeight(),
+            /* A keyboard grab has to outlast the hover that opened it, or the
+             * island would close under the pointer while you are typing. */
+            onGrabChanged: () => {
+                this._cancelCollapseTimer();
+                this._cancelAllHideTimers();
+            },
+        });
+        this._deck.add({
+            id: 'search',
+            name: 'Recherche',
+            actor: this._searchPane.actor,
+            width: 560,
+            onShow: () => this._searchPane?.start(),
+            onHide: () => this._searchPane?.stop(),
+            onDestroy: () => {
+                this._searchPane?.destroy();
+                this._searchPane = null;
+            },
+        });
+
         this._deck.add({
             id: 'system',
             name: 'Système',
@@ -1139,6 +1216,36 @@ export default class DynamicIslandExtension extends Extension {
         const saved = this._settings.get_string('active-pane');
         if (this._deck.has(saved))
             this._deck.activate(saved, {animate: false});
+    }
+
+    /* Each pane may ask for more width than the shelf setting -- search results
+     * at 380 px are a column of truncated labels. Capped against the monitor so
+     * a wide request cannot push the island off the screen. */
+    _paneWidth() {
+        const base = this._settings.get_int('shelf-width');
+        const wanted = this._deck?.active?.width ?? base;
+        const monitor = Main.layoutManager.primaryMonitor;
+        const ceiling = monitor ? monitor.width - 40 : wanted;
+
+        return Math.max(base, Math.min(wanted, ceiling));
+    }
+
+    /* For a pane whose own content changed height -- search results arriving,
+     * an agent appearing. Same morph as a pane switch, without the switch. */
+    _morphToContentHeight() {
+        if (!this._expanded || !this._expandedBox || this._capsuleShown)
+            return;
+
+        const width = this._expandedBox.width;
+        const fromHeight = this._expandedBox.height;
+        const toHeight = this._measureExpandedHeight(width);
+
+        if (toHeight === fromHeight)
+            return;
+
+        this._animateGeometry(width, width, fromHeight, toHeight,
+            Math.round(this._settings.get_int('animation-duration') * 0.8),
+            Clutter.AnimationMode.EASE_OUT_CUBIC);
     }
 
     _buildMediaPane() {
@@ -1201,14 +1308,15 @@ export default class DynamicIslandExtension extends Extension {
 
         this._settings.set_string('active-pane', this._deck.activeId);
 
-        const width = this._expandedBox.width;
+        const fromWidth = this._expandedBox.width;
         const fromHeight = this._expandedBox.height;
-        const toHeight = this._measureExpandedHeight(width);
+        const toWidth = this._paneWidth();
+        const toHeight = this._measureExpandedHeight(toWidth);
 
-        if (toHeight === fromHeight)
+        if (toHeight === fromHeight && toWidth === fromWidth)
             return;
 
-        this._animateGeometry(width, width, fromHeight, toHeight,
+        this._animateGeometry(fromWidth, toWidth, fromHeight, toHeight,
             Math.round(this._settings.get_int('animation-duration') * 0.8),
             Clutter.AnimationMode.EASE_OUT_CUBIC);
     }
@@ -1508,6 +1616,13 @@ export default class DynamicIslandExtension extends Extension {
         this._topRow.insert_child_at_index(this._timerDot, 0);
     }
 
+    /* Appended, so the indicators that _gatherIndicators() inserts at the front
+     * push it to the right-hand end of the pill. */
+    _buildAgentStrip() {
+        this._agentStrip = new AgentStrip();
+        this._topRow.add_child(this._agentStrip.actor);
+    }
+
     _timerToggleRun() {
         if (this._timerRunning) {
             this._timerStop();
@@ -1656,6 +1771,9 @@ export default class DynamicIslandExtension extends Extension {
         this._capsule = null;
         this._capsuleShown = false;
 
+        this._agentStrip?.destroy();
+        this._agentStrip = null;
+
         /* The indicators have to be out before this subtree goes, or they are
          * destroyed along with it. */
         if (this._islandBody) {
@@ -1703,6 +1821,11 @@ export default class DynamicIslandExtension extends Extension {
         if (!this._expanded)
             return;
 
+        /* Somebody is typing in the search field. The pointer wandering off is
+         * not a reason to take the island away from them. */
+        if (this._searchPane?.hasGrab)
+            return;
+
         this._collapseTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
             this._settings.get_int('hide-delay'), () => {
                 this._collapseTimer = 0;
@@ -1735,7 +1858,13 @@ export default class DynamicIslandExtension extends Extension {
         this._updateMedia();
 
         const duration = this._settings.get_int('animation-duration');
-        const targetWidth = this._settings.get_int('shelf-width');
+        const targetWidth = this._paneWidth();
+
+        /* The pane is on screen from here on. onShow/onHide mean exactly that,
+         * not "you are the selected pane": the system gauges must not sample,
+         * and the search field must not hold a keyboard grab, merely because
+         * their pane happens to be the current one inside a closed pill. */
+        this._deck.setLive(true);
 
         /* Measure the unfolded content before it is on screen, so the growth has
          * a real target rather than a guess. */
@@ -1770,6 +1899,12 @@ export default class DynamicIslandExtension extends Extension {
             return;
 
         this._expanded = false;
+
+        /* Panes are off screen from here on: the gauges stop sampling and the
+         * search field drops anything it was holding, including the keyboard.
+         * Collapsing is blocked while that grab is live, so reaching here means
+         * it was already released -- this is the belt to those braces. */
+        this._deck.setLive(false);
 
         const duration = this._settings.get_int('animation-duration');
 

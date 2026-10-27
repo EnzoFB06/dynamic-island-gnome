@@ -54,7 +54,13 @@ not spawn a second surface underneath: `Panel.vfunc_allocate()` pins the centre 
 the panel's height, so the panel's height is what grows, and the content is stacked
 inside the island.
 
-The expanded panel holds:
+The expanded panel is a **deck of panes**, one at a time, and the wheel moves
+between them. A row of dots at the bottom carries the position, with the pane's
+name beside it fading back once you have landed. The island takes the size of
+whichever pane is up -- height always, and width when a pane asks for more --
+so each one gets the room it needs rather than the room the largest one needs.
+
+The panes:
 
 - **Now playing** — title, artist, cover art and transport controls for any MPRIS
   player. Remote cover art (Spotify serves an `https` URL) is downloaded once into
@@ -64,6 +70,47 @@ The expanded panel holds:
   (the − and + buttons, or scrolling on the ring) as well as from the preferences. While
   a session runs, a coloured dot sits next to the clock in the collapsed island: blue
   while running, amber while paused.
+- **Agents** — one robot per running Claude Code session, each drawn rather than
+  assembled from icons, because the state is the pose: a working agent bobs and
+  its eyes scan, one waiting on you holds still with its eyes wide, one that has
+  finished tilts its head with its eyes shut. Up to three of them also sit beside
+  the clock in the collapsed pill, so an agent working in the background is
+  visible without opening anything. This needs the hook below.
+- **Search** — the shell's own `SearchResultsView`, the object the overview uses,
+  so everything the desktop can already find is found here too and ranked the
+  same way. Click the field to type: the island lives in the shell's chrome, and
+  chrome does not receive key events, so the pane takes a modal grab exactly as
+  the overview does — on the click, never merely because the pane is on screen.
+- **System** — processor, memory and disk as rings, with network throughput and
+  uptime beside them, sampled only while the pane is on screen.
+
+## Events
+
+Four things take the island over for a few seconds, each with its own motion: a
+notification ripples outward, a charger fills a ring, a Bluetooth device sends
+arcs, and a finished focus session throws its ring's dots off the edge. Events
+are queued rather than overwritten, never interrupt an island you have open, and
+stay out of the way while the island is hidden over a fullscreen window unless
+you ask otherwise. Do Not Disturb silences the notification capsule, because it
+is a banner in all but name.
+
+## Claude Code agents
+
+The extension cannot see inside Claude Code, so Claude Code reports to it: a
+hook writes one small JSON file per session into `$XDG_RUNTIME_DIR/dynamic-island/agents/`,
+and the island watches that directory. No polling of processes, no reading of
+logs.
+
+```bash
+make show-hooks     # print what would be written, change nothing
+make install-hooks  # register in ~/.claude/settings.json
+make uninstall-hooks
+```
+
+It merges into whatever that file already holds and backs it up first. The state
+directory lives under `XDG_RUNTIME_DIR`, so it is wiped on reboot, and the island
+ages out any session that stops reporting. Entirely optional — every other pane
+works without it.
 
 **Auto-hide** — by default the island tucks itself away over a fullscreen window and
 comes back when the pointer reaches the top. The trigger strip spans the island's width

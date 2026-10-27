@@ -15,6 +15,7 @@ import St from 'gi://St';
 const GAUGE_SIZE = 56;
 const GAUGE_THICKNESS = 5;
 const SAMPLE_MS = 1500;
+const PRIME_MS = 250;
 
 const METRICS = [
     {id: 'cpu', label: 'CPU', rgb: [0x6a / 255, 0xa9 / 255, 0xe0 / 255]},
@@ -134,6 +135,7 @@ class Gauge {
 export class SystemPane {
     constructor() {
         this._timer = 0;
+        this._primeTimer = 0;
         this._cpu = null;
         this._net = null;
         this._gauges = new Map();
@@ -187,6 +189,17 @@ export class SystemPane {
 
         /* Baseline first, then the real readings: a rate needs two points. */
         this._sample();
+
+        /* The second point is taken quickly rather than on the normal cadence.
+         * Processor load and throughput are differences, so the first sample
+         * can only show a dash -- and a pane that opens on three dashes and
+         * stays that way for a second and a half reads as broken. */
+        this._primeTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, PRIME_MS, () => {
+            this._primeTimer = 0;
+            this._sample();
+            return GLib.SOURCE_REMOVE;
+        });
+
         this._timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SAMPLE_MS, () => {
             this._sample();
             return GLib.SOURCE_CONTINUE;
@@ -197,6 +210,11 @@ export class SystemPane {
         if (this._timer) {
             GLib.Source.remove(this._timer);
             this._timer = 0;
+        }
+
+        if (this._primeTimer) {
+            GLib.Source.remove(this._primeTimer);
+            this._primeTimer = 0;
         }
 
         /* Dropped so the next opening measures afresh rather than against a

@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Register (or remove) the Dynamic Island hooks in Claude Code's settings.
+
+Claude Code reads ~/.claude/settings.json. This merges our hook into the
+"hooks" section and leaves everything else in that file exactly as it was --
+it is the user's configuration, not ours. Running it twice changes nothing.
+
+    di-install-hooks            register
+    di-install-hooks --remove   unregister
+    di-install-hooks --print    show what would be written, write nothing
+"""
+
+import json
+import os
+import shutil
+import sys
+
+# One hook per lifecycle point. The script itself decides what each event
+# means; registering all of them keeps that decision in one place.
+EVENTS = [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "Notification",
+    "Stop",
+    "SubagentStop",
+    "PreCompact",
+    "SessionEnd",
+]
+
+HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "di-agent-hook")
+SETTINGS = os.path.expanduser("~/.claude/settings.json")
+
+
+def load():
+    try:
+        with open(SETTINGS) as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as error:
+        sys.exit(f"{SETTINGS} is not valid JSON ({error}); not touching it.")
+
+    if not isinstance(data, dict):
+        sys.exit(f"{SETTINGS} is not a JSON object; not touching it.")
+
+    return data
+
+
+def entries_for(data, event):
+    return data.setdefault("hooks", {}).setdefault(event, [])
+
+
+def is_ours(entry):
+    hooks = entry.get("hooks", []) if isinstance(entry, dict) else []
+    return any(h.get("command", "").endswith("di-agent-hook") for h in hooks)
+
+
+def register(data):
+    changed = False
+
+    for event in EVENTS:
+        entries = entries_for(data, event)
+        if any(is_ours(entry) for entry in entries):
+            continue
+
+        entries.append({"hooks": [{"type": "command", "command": HOOK}]})
+        changed = True
+
+    return changed
+
+
+def unregister(data):
+    hooks = data.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+
+    changed = False
+
+    for event in list(hooks):
+        kept = [entry for entry in hooks[event] if not is_ours(entry)]
+        if len(kept) != len(hooks[event]):
+            changed = True
+        if kept:
+            hooks[event] = kept
+        else:
+            del hooks[event]
+
+    # Leave no empty scaffolding behind in someone else's config.
+    if not hooks:
+        del data["hooks"]
+
+    return changed
+
+
+def main():
+    remove = "--remove" in sys.argv
+    dry_run = "--print" in sys.argv
+
+    if not os.path.exists(HOOK):
+        sys.exit(f"{HOOK} is missing; run this from the repository.")
+
+    data = load()
+    changed = unregister(data) if remove else register(data)
+
+    if dry_run:
+        print(json.dumps(data, indent=2))
+        return
+
+    if not changed:
+        print("Nothing to do: already" + (" absent." if remove else " registered."))
+        return
+
+    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+
+    # The file may hold a lot more than our hooks. Keep a copy before writing.
+    if os.path.exists(SETTINGS):
+        shutil.copy2(SETTINGS, SETTINGS + ".di-backup")
+
+    tmp = SETTINGS + ".tmp"
+    with open(tmp, "w") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+    os.replace(tmp, SETTINGS)
+
+    print(("Removed from " if remove else "Registered in ") + SETTINGS)
+    if not remove:
+        print("New Claude Code sessions will report to the island.")
+
+
+if __name__ == "__main__":
+    main()

@@ -355,3 +355,91 @@
   font-size: 0.8em;
   color: rgba(255, 255, 255, 0.65);
 }
+
+/* --------------------------------------------------------------- search ---
+ * The field is ours; the results below it are the shell's own
+ * SearchResultsView, so it arrives with the overview's styling already on it
+ * and only needs the surrounding box. */
+#dynamicIslandExpanded .di-search {
+  spacing: 8px;
+  padding: 0 4px;
+}
+
+#dynamicIslandExpanded .di-search-entry {
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: #ffffff;
+  caret-color: #ffffff;
+  selection-background-color: rgba(106, 169, 224, 0.5);
+  padding: 6px 12px;
+  font-size: 0.95em;
+}
+
+#dynamicIslandExpanded .di-search-entry:focus {
+  background-color: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+#dynamicIslandExpanded .di-search-entry StLabel.hint-text {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+#dynamicIslandExpanded .di-search-icon {
+  color: rgba(255, 255, 255, 0.6);
+  padding-right: 6px;
+}
+
+/* The results keep their own scrolling, so the box is a fixed window onto
+ * them rather than something that grows. */
+#dynamicIslandExpanded .di-search-results {
+  padding: 0;
+}
+
+/* --------------------------------------------------------------- agents ---
+ * One row per Claude Code session: the robot carries the state, the labels say
+ * which session and what it is doing. */
+#dynamicIslandExpanded .di-agents {
+  spacing: 4px;
+  padding: 0 6px;
+}
+
+#dynamicIslandExpanded .di-agent-list {
+  spacing: 6px;
+}
+
+#dynamicIslandExpanded .di-agent-row {
+  spacing: 10px;
+}
+
+#dynamicIslandExpanded .di-agent-name {
+  font-weight: bold;
+  font-size: 0.92em;
+  color: #ffffff;
+}
+
+#dynamicIslandExpanded .di-agent-state {
+  font-size: 0.78em;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* The count of subagents this session has out. */
+#dynamicIslandExpanded .di-agent-badge {
+  font-size: 0.72em;
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.85);
+  background-color: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+#dynamicIslandExpanded .di-agent-more {
+  font-size: 0.72em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* The collapsed pill's own robots, beside the clock. */
+#panel #panelCenter .di-agent-strip {
+  spacing: 3px;
+  padding: 0 4px 0 2px;
+}

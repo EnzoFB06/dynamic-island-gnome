@@ -24,6 +24,12 @@ export class PaneDeck {
     constructor({onChanged, fadeDuration = 120} = {}) {
         this._panes = [];
         this._activeId = null;
+        /* A pane's onShow/onHide mean "you are on screen", not "you are
+         * selected". The deck is only live while the island is unfolded, so the
+         * system gauges do not sample and the search field does not hold a
+         * keyboard grab just because that pane happens to be the current one in
+         * a collapsed pill. */
+        this._live = false;
         this._onChanged = onChanged;
         this._fadeDuration = fadeDuration;
         this._nameTimer = 0;
@@ -51,6 +57,11 @@ export class PaneDeck {
             style_class: 'di-pane-name',
             y_align: Clutter.ActorAlign.CENTER,
         });
+        /* An ellipsizing label reports a tiny preferred width -- Pango is
+         * entitled to cut the text, so it asks for almost nothing and gets it.
+         * "Systeme" came out as "Syste...". These names are two words at most;
+         * let the label ask for the room it actually needs. */
+        this._nameLabel.clutter_text.ellipsize = 0; /* Pango NONE */
         this._footer.add_child(this._nameLabel);
 
         this._dots = new St.BoxLayout({
@@ -80,6 +91,27 @@ export class PaneDeck {
             this._syncDots();
 
         return pane;
+    }
+
+    /* Called when the island unfolds and when it closes. */
+    setLive(live) {
+        if (this._live === live)
+            return;
+
+        this._live = live;
+
+        const pane = this.active;
+        if (!pane)
+            return;
+
+        if (live)
+            pane.onShow?.();
+        else
+            pane.onHide?.();
+    }
+
+    get live() {
+        return this._live;
     }
 
     get panes() {
@@ -115,14 +147,16 @@ export class PaneDeck {
         this._activeId = id;
 
         if (previous) {
-            previous.onHide?.();
+            if (this._live)
+                previous.onHide?.();
             previous.actor.remove_all_transitions();
             previous.actor.visible = false;
             previous.actor.opacity = 255;
         }
 
         next.actor.visible = true;
-        next.onShow?.();
+        if (this._live)
+            next.onShow?.();
 
         /* The pane fades in on the spot while the island morphs around it. A
          * slide would have to be clipped against a box that is still resizing,
@@ -209,9 +243,11 @@ export class PaneDeck {
         this._cancelNameTimer();
 
         for (const pane of this._panes) {
-            pane.onHide?.();
+            if (this._live)
+                pane.onHide?.();
             pane.onDestroy?.();
         }
+        this._live = false;
         this._panes = [];
 
         this.actor?.destroy();
