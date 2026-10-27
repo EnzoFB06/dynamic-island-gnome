@@ -217,7 +217,12 @@ export default class DynamicIslandExtension extends Extension {
         this._eventQueue = [];
         this._capsule = new DetachedCapsule({
             settings: this._settings,
-            onDone: () => this._pumpEvents(),
+            onDone: () => {
+                /* Let the island come back if it should -- the conditions may
+                 * have changed while the capsule was up. */
+                this._syncAutoHide();
+                this._pumpEvents();
+            },
         });
         Main.layoutManager.addTopChrome(this._capsule.actor, {trackFullscreen: false});
 
@@ -765,6 +770,12 @@ export default class DynamicIslandExtension extends Extension {
     }
 
     _revealUnit(unit) {
+        /* A capsule is standing where this island stands. Whatever asked for
+         * the island back -- a hover, a window closing -- has to wait, or the
+         * two are drawn through each other. */
+        if (unit.isPrimary && this._capsule?.showing)
+            return;
+
         this._cancelHideTimer(unit);
         if (unit.revealed)
             return;
@@ -2021,7 +2032,18 @@ export default class DynamicIslandExtension extends Extension {
         if (!event)
             return;
 
+        /* The capsule takes the island's own place, eight pixels below the top
+         * edge, so the island steps aside for it. That is the morph illusion
+         * ActivSpot uses: one shape appears to become the other because they
+         * never share the screen. */
+        this._yieldIsland();
         this._capsule.show(event, {ringDots: this._settings.get_int('ring-dots')});
+    }
+
+    _yieldIsland() {
+        const unit = this._units?.find(u => u.isPrimary);
+        if (unit?.revealed)
+            this._hideUnit(unit);
     }
 
     /* ---------------------------------------------------------------- media */

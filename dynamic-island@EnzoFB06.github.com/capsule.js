@@ -1,23 +1,32 @@
 /* Dynamic Island -- the detached capsule.
  *
- * An event does not deform the island any more; it gets a pill of its own,
- * floating below the top edge. That is what lets a notification show up while
- * the island itself is tucked away over a fullscreen window: the two are
- * separate chrome actors, and only one of them is hiding.
+ * An event does not deform the island; it gets a pill of its own, eight pixels
+ * below the top edge, where the island itself sits. That is deliberate: the two
+ * share a position and the island steps aside while the capsule is up, which is
+ * the morph illusion ActivSpot uses for its launcher. It is also what lets a
+ * notification appear while the island is tucked away over a fullscreen window
+ * -- they are separate chrome actors, and only one of them is hiding.
  *
- * Three acts, after ActivSpot's notification island:
+ * Three acts:
  *
- *   full      a wide pill with the icon, the title and the body, held long
- *             enough to read
- *   compact   it draws in to a small pill carrying the icon and one line, and
- *             lingers there -- the part you catch out of the corner of your eye
+ *   full      420x110, the icon in its rounded tile, the application's name,
+ *             the title and two lines of body
+ *   compact   it draws in to a small centred pill -- icon and one line -- and
+ *             lingers there, the part you catch out of the corner of your eye
  *             after you have stopped reading
  *   away      it lifts, shrinks and fades
  *
+ * The measurements, the palette and the timings are ActivSpot's
+ * (github.com/Devvvmn/ActivSpot, scripts/quickshell/notifications), down to the
+ * 8 px top margin, the 380 ms shape animation and the two background alphas.
+ * Its palette is Catppuccin Mocha, so that is what this uses rather than the
+ * flat black the island is painted with -- the capsule is a different object
+ * and is allowed to look like one.
+ *
  * The geometry is stepped by hand rather than eased, for the same reason the
  * island's is: the pill is centred, so its x is a function of its width, and
- * easing width and position as two separate transitions lets them disagree by a
- * pixel on every frame. One timeline computes both.
+ * easing width and position as two transitions lets them disagree by a pixel on
+ * every frame.
  */
 
 import Clutter from 'gi://Clutter';
@@ -33,19 +42,38 @@ export const CAPSULE_ACTOR_NAME = 'dynamicIslandCapsule';
 
 const BLUR_EFFECT_NAME = 'dynamic-island-capsule-blur';
 
-/* ActivSpot moves its island with a 540 ms OutExpo and fades at 200 ms
- * OutCubic, and that pairing is most of why the thing feels like hardware
- * rather than like a widget: the shape arrives well before the content does. */
-const MORPH_MS = 480;
+/* Catppuccin Mocha, the palette ActivSpot falls back to when matugen has not
+ * written one. Only the handful the notification uses. */
+const BASE = '30, 30, 46';         /* #1e1e2e */
+const SURFACE0 = '#313244';
+const SURFACE1 = '#45475a';
+const MAUVE = '203, 166, 247';     /* #cba6f7 */
+const TEXT_RGB = '205, 214, 244';  /* #cdd6f4 */
+
+/* Eight pixels below the top edge: the island's own place, which the island
+ * gives up while a capsule is showing. */
+const TOP_MARGIN = 8;
+
+/* ActivSpot animates the shape over 380 ms on cubic-bezier(0.16, 1, 0.3, 1).
+ * Clutter has no cubic-bezier mode here; EASE_OUT_EXPO is that curve to within
+ * a couple of percent, and the difference is not visible at this size. */
+const MORPH_MS = 380;
+const CONTENT_FADE_MS = 280;
+const SLIDE_MS = 320;
 const FADE_MS = 200;
 const AWAY_MS = 300;
 
-const FULL_WIDTH = 400;
-const FULL_PADDING = 14;
-const COMPACT_HEIGHT = 36;
-const COMPACT_MAX_WIDTH = 280;
+const FULL_WIDTH = 420;
+const FULL_MIN_HEIGHT = 96;
+const FULL_MAX_HEIGHT = 130;
 
-const GLYPH_SIZE = 46;
+const COMPACT_HEIGHT = 44;
+const COMPACT_MIN_WIDTH = 180;
+const COMPACT_MAX_WIDTH = 320;
+
+const ICON_TILE_FULL = 48;
+const ICON_TILE_COMPACT = 24;
+
 const GLYPH_MS = 1150;
 
 const Phase = {
@@ -75,6 +103,7 @@ export class DetachedCapsule {
              * actor with no allocation makes it complain once per frame. */
             visible: false,
             opacity: 0,
+            clip_to_allocation: true,
         });
         this.actor.set_pivot_point(0.5, 0);
 
@@ -86,45 +115,50 @@ export class DetachedCapsule {
         });
         this.actor.add_child(this._body);
 
-        const stack = new St.Widget({
+        /* The icon sits in a tile of its own, the way it does in the reference:
+         * a rounded square a shade lighter than the pill. It is also what the
+         * per-event motion is painted into, behind the icon. */
+        this._iconTile = new St.Widget({
             layout_manager: new Clutter.BinLayout(),
-            width: GLYPH_SIZE,
-            height: GLYPH_SIZE,
             y_align: Clutter.ActorAlign.CENTER,
+            clip_to_allocation: true,
         });
-        this._glyphStack = stack;
-        this._body.add_child(stack);
+        this._body.add_child(this._iconTile);
 
-        this._glyph = new St.DrawingArea({width: GLYPH_SIZE, height: GLYPH_SIZE});
+        this._glyph = new St.DrawingArea();
         this._glyph.connect('repaint', () => this._paintGlyph());
-        stack.add_child(this._glyph);
+        this._iconTile.add_child(this._glyph);
 
         this._icon = new St.Icon({
             style_class: 'di-capsule-icon',
-            icon_size: 22,
             x_align: Clutter.ActorAlign.CENTER,
             y_align: Clutter.ActorAlign.CENTER,
         });
-        /* set_pivot_point() takes two floats. Clutter.Point is not constructible
-         * from GJS here -- the boxed type is Graphene's now -- and reaching for
-         * the setter sidesteps the question entirely. */
         this._icon.set_pivot_point(0.5, 0.5);
-        stack.add_child(this._icon);
+        this._iconTile.add_child(this._icon);
 
         this._text = new St.BoxLayout({
             orientation: Clutter.Orientation.VERTICAL,
             y_align: Clutter.ActorAlign.CENTER,
-            x_expand: true,
             style_class: 'di-capsule-text',
         });
         this._body.add_child(this._text);
 
+        this._appLabel = new St.Label({style_class: 'di-capsule-app'});
+        this._appLabel.clutter_text.ellipsize = 3; /* Pango END */
+        this._text.add_child(this._appLabel);
+
         this._title = new St.Label({style_class: 'di-capsule-title'});
-        this._title.clutter_text.ellipsize = 3; /* Pango END */
+        this._title.clutter_text.ellipsize = 3;
         this._text.add_child(this._title);
 
         this._bodyLabel = new St.Label({style_class: 'di-capsule-body'});
-        this._bodyLabel.clutter_text.ellipsize = 3;
+        /* Wrapped, not ellipsized. The two are alternatives in Pango -- a text
+         * allowed to cut itself never wraps, which is why the body stayed on
+         * one line however much height it was given. The pill is clamped
+         * instead, and the actor clips, so a long message runs to two lines and
+         * stops rather than pushing the capsule down the screen. */
+        this._bodyLabel.clutter_text.ellipsize = 0; /* Pango NONE */
         this._bodyLabel.clutter_text.line_wrap = true;
         this._text.add_child(this._bodyLabel);
 
@@ -150,9 +184,9 @@ export class DetachedCapsule {
         this._event = event;
         this._dotCount = ringDots;
 
+        this._appLabel.text = event.appName ?? '';
         this._title.text = event.title ?? '';
         this._bodyLabel.text = event.body ?? '';
-        this._bodyLabel.visible = !!event.body;
 
         if (event.gicon)
             this._icon.gicon = event.gicon;
@@ -167,7 +201,7 @@ export class DetachedCapsule {
         this.actor.show();
 
         const width = Math.min(FULL_WIDTH, monitor.width - 80);
-        const height = this._measureHeight(width);
+        const height = this._measureFullHeight(width);
 
         /* It arrives from behind the top edge rather than fading in on the
          * spot: the pill should look as though it came out of the bezel. */
@@ -183,7 +217,29 @@ export class DetachedCapsule {
 
         this._phase = Phase.FULL;
         this._morphTo(width, height, () => this._runGlyph());
+        this._enterContent();
         this._armPhaseTimer();
+    }
+
+    /* The content does not simply appear with the shape. It fades over 280 ms
+     * and rises the last eight pixels with a small overshoot, a beat behind the
+     * pill -- which is most of why the reference reads as one object moving
+     * rather than a box with things drawn in it. */
+    _enterContent() {
+        this._body.remove_all_transitions();
+        this._body.opacity = 0;
+        this._body.translation_y = 8;
+
+        this._body.ease({
+            opacity: 255,
+            duration: CONTENT_FADE_MS,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+        this._body.ease({
+            translation_y: 0,
+            duration: SLIDE_MS,
+            mode: Clutter.AnimationMode.EASE_OUT_BACK,
+        });
     }
 
     /* The second act: the same pill, drawn in around the icon and one line. */
@@ -195,8 +251,8 @@ export class DetachedCapsule {
         this._stopGlyph();
         this._applyStyle(Phase.COMPACT);
 
-        const width = this._measureCompactWidth();
-        this._morphTo(width, COMPACT_HEIGHT);
+        this._morphTo(this._measureCompactWidth(), COMPACT_HEIGHT);
+        this._enterContent();
         this._armPhaseTimer();
     }
 
@@ -326,21 +382,14 @@ export class DetachedCapsule {
         this.actor.set_size(width, height);
         this.actor.set_position(
             monitor.x + Math.round((monitor.width - width) / 2),
-            monitor.y + this._topOffset());
+            monitor.y + TOP_MARGIN);
+
     }
 
-    /* Clear of the island, whether or not the island is on screen: a capsule
-     * that jumped up and down depending on a fullscreen window would be worse
-     * than one that always sits a little lower. */
-    _topOffset() {
-        const s = this._settings;
-        const gap = s.get_string('style') === 'floating' ? s.get_int('top-gap') : 0;
-        return s.get_int('island-height') + gap + 8;
-    }
-
-    _measureHeight(forWidth) {
-        const [, height] = this._body.get_preferred_height(forWidth - FULL_PADDING * 2);
-        return Math.max(COMPACT_HEIGHT, Math.round(height) + FULL_PADDING * 2);
+    _measureFullHeight(forWidth) {
+        const [, height] = this._body.get_preferred_height(forWidth);
+        return Math.min(FULL_MAX_HEIGHT,
+            Math.max(FULL_MIN_HEIGHT, Math.round(height)));
     }
 
     /* The compact pill is as wide as its one line, within reason.
@@ -348,8 +397,8 @@ export class DetachedCapsule {
      * The title ellipsizes, and an ellipsizing label asks for almost nothing --
      * Pango is entitled to cut the text, so it reports a minimum rather than
      * the width of what it holds. Asked as it stands, every capsule came back
-     * at the floor of 140 px with the title clipped. So the question is put
-     * with the cut turned off, and the answer clamped. */
+     * at the floor with its title clipped. So the question is put with the cut
+     * turned off, and the answer clamped. */
     _measureCompactWidth() {
         const text = this._title.clutter_text;
         const ellipsize = text.ellipsize;
@@ -358,38 +407,66 @@ export class DetachedCapsule {
         const [, width] = this._body.get_preferred_width(COMPACT_HEIGHT);
         text.ellipsize = ellipsize;
 
-        return Math.min(COMPACT_MAX_WIDTH, Math.max(140, Math.round(width)));
+        return Math.min(COMPACT_MAX_WIDTH,
+            Math.max(COMPACT_MIN_WIDTH, Math.round(width)));
     }
 
     /* ------------------------------------------------------------- style */
 
     _applyStyle(phase) {
-        const s = this._settings;
-        const opacity = s.get_double('bg-opacity').toFixed(3);
         const full = phase === Phase.FULL;
 
-        /* Fully rounded when compact, softly rounded when full -- the same
-         * relationship the island has between its pill and its panel. */
-        const radius = full ? 24 : COMPACT_HEIGHT / 2;
+        this._phaseStyle = full
+            ? {alpha: 0.95, border: `rgba(${MAUVE}, 0.4)`}
+            : {alpha: 0.88, border: `rgba(${TEXT_RGB}, 0.08)`};
 
-        this.actor.set_style(
-            `background-color: rgba(0, 0, 0, ${opacity}); border-radius: ${radius}px;`);
+        this._applyBackground();
 
         this._body.style_class = full
             ? 'di-capsule di-capsule-full'
             : 'di-capsule di-capsule-compact';
 
-        this._glyphStack.set_size(full ? GLYPH_SIZE : 24, full ? GLYPH_SIZE : 24);
-        this._glyph.set_size(full ? GLYPH_SIZE : 24, full ? GLYPH_SIZE : 24);
-        this._glyph.visible = full;
-        this._icon.icon_size = full ? 22 : 15;
+        const tile = full ? ICON_TILE_FULL : ICON_TILE_COMPACT;
+        this._iconTile.set_size(tile, tile);
+        this._iconTile.set_style(
+            `background-color: ${full ? SURFACE0 : SURFACE1};` +
+            ` border-radius: ${full ? 12 : 6}px;`);
 
+        this._glyph.set_size(tile, tile);
+        this._glyph.visible = full;
+        this._icon.icon_size = full ? 26 : 14;
+
+        /* Compact carries one line and is centred; full is a left-aligned
+         * block of three. */
+        this._body.x_align = full
+            ? Clutter.ActorAlign.FILL
+            : Clutter.ActorAlign.CENTER;
+        this._text.x_expand = full;
+
+        this._appLabel.visible = full && !!this._event?.appName;
         this._bodyLabel.visible = full && !!this._event?.body;
         this._title.style_class = full
             ? 'di-capsule-title'
             : 'di-capsule-title di-capsule-title-compact';
 
         this._applyBlur();
+    }
+
+    /* The reference computes the radius as half the height on every frame.
+     * Here it is simply larger than any height the pill will take: CSS scales
+     * a radius down to fit the box, so one declaration gives a fully rounded
+     * pill at 110 px and at 44 px alike -- and the style is set twice per
+     * capsule rather than sixty times a second. */
+    _applyBackground() {
+        const {alpha, border} = this._phaseStyle ??
+            {alpha: 0.95, border: `rgba(${MAUVE}, 0.4)`};
+
+        this.actor.set_style([
+            `background-color: rgba(${BASE}, ${alpha});`,
+            `border: 1px solid ${border};`,
+            'border-radius: 999px;',
+            'box-shadow: 0 6px 18px rgba(0, 0, 0, 0.30);',
+        ].join(' '));
     }
 
     _applyBlur() {
@@ -449,8 +526,7 @@ export class DetachedCapsule {
 
         const cr = this._glyph.get_context();
         const progress = this._timeline?.get_progress() ?? 1;
-        const size = this._glyph.width;
-        const half = size / 2;
+        const half = this._glyph.width / 2;
         const [r, g, b] = motifFor(this._event?.kind).rgb;
 
         switch (this._event?.kind) {

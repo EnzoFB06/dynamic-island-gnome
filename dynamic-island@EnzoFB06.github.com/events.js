@@ -174,6 +174,7 @@ export class EventMonitor {
 
         this._emit({
             kind: EventKind.NOTIFICATION,
+            appName: source.title ?? '',
             title: notification.title || source.title || 'Notification',
             body: notification.body ?? '',
             gicon: notification.gicon ?? source.icon ?? null,

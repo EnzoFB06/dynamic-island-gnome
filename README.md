@@ -94,9 +94,11 @@ ripples outward, a charger fills a ring, a Bluetooth device sends arcs, and a
 finished focus session throws its ring's dots off the edge.
 
 They do not deform the island. Each gets a **detached capsule** -- a pill of its
-own, floating below the top edge -- which is what lets a notification appear
-while the island itself is tucked away over a fullscreen window: the two are
-separate chrome actors, and only one of them is hiding.
+own, eight pixels below the top edge, where the island itself sits. The island
+steps aside while a capsule is up, so one shape appears to become the other;
+they never share the screen. Being a separate chrome actor is also what lets a
+notification appear while the island is tucked away over a fullscreen window --
+only one of the two is hiding.
 
 The capsule plays in three acts, after
 [ActivSpot](https://github.com/Devvvmn/ActivSpot)'s notification island:
@@ -113,6 +115,16 @@ way clicking the shell's own banner does. Events queue rather than overwrite,
 and the capsule shows exactly the set the shell would have bannered -- the same
 policy tests, so a muted application or a low-urgency background update stays
 quiet here too.
+
+The measurements and the palette are ActivSpot's, from
+`scripts/quickshell/notifications`: 8 px from the top, 420x110 and 180x44, a
+380 ms shape animation on `cubic-bezier(0.16, 1, 0.3, 1)`, content fading over
+280 ms and rising its last eight pixels with a small overshoot, a background at
+0.95 opacity expanded and 0.88 compact, a one-pixel hairline in mauve then in
+white at 0.08, and Catppuccin Mocha throughout -- which is why the capsule does
+not match the island's flat black. It is a different object and is allowed to
+look like one. The font is the desktop's own: the reference sets JetBrains
+Mono, but a shell extension has no business overriding that.
 
 ## Claude Code agents
 
