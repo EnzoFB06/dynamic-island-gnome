@@ -123,6 +123,64 @@ export default class DynamicIslandPreferences extends ExtensionPreferences {
         settings.bind('concave-corners', corners, 'active', Gio.SettingsBindFlags.DEFAULT);
         look.add(corners);
 
+        /* ----------------------------------------------------------- events */
+        const events = new Adw.PreferencesGroup({
+            title: 'Ev\u00e9nements',
+            description: 'Un \u00e9v\u00e9nement prend bri\u00e8vement l\u2019encoche : elle s\u2019\u00e9largit en '
+                + 'capsule, joue une animation propre \u00e0 ce qui vient d\u2019arriver, puis '
+                + 'redevient une pastille. Survoler la capsule l\u2019ouvre en panneau complet.',
+        });
+        page.add(events);
+
+        const capsules = new Adw.SwitchRow({
+            title: 'Activer les capsules',
+        });
+        settings.bind('event-capsules', capsules, 'active', Gio.SettingsBindFlags.DEFAULT);
+        events.add(capsules);
+
+        const kinds = [
+            ['events-notifications', 'Notifications',
+                'Les m\u00eames que la barre afficherait : le mode Ne pas d\u00e9ranger et les '
+                + 'applications mises en sourdine sont respect\u00e9s.'],
+            ['events-power', 'Branchement du chargeur',
+                'Un anneau se remplit jusqu\u2019au niveau de la batterie, et se vide dans '
+                + 'l\u2019autre sens au d\u00e9branchement.'],
+            ['events-bluetooth', 'Connexion Bluetooth',
+                'Trois arcs qui s\u2019allument, comme un indicateur radio.'],
+            ['events-timer', 'Fin du timer de focus',
+                'Les ronds de l\u2019anneau quittent le cercle vers l\u2019ext\u00e9rieur.'],
+        ];
+
+        const rows = [];
+        for (const [key, title, subtitle] of kinds) {
+            const row = new Adw.SwitchRow({title, subtitle});
+            settings.bind(key, row, 'active', Gio.SettingsBindFlags.DEFAULT);
+            events.add(row);
+            rows.push(row);
+        }
+
+        const dwell = this._spin(settings, 'event-dwell',
+            'Dur\u00e9e d\u2019affichage', 'En millisecondes.', 800, 10000);
+        events.add(dwell);
+
+        const inFullscreen = new Adw.SwitchRow({
+            title: 'Aussi en plein \u00e9cran',
+            subtitle: 'Par d\u00e9faut non : quand l\u2019encoche s\u2019est effac\u00e9e devant une '
+                + 'fen\u00eatre en plein \u00e9cran, ce silence est volontaire.',
+        });
+        settings.bind('events-in-fullscreen', inFullscreen, 'active',
+            Gio.SettingsBindFlags.DEFAULT);
+        events.add(inFullscreen);
+
+        /* The per-kind switches say nothing while the whole feature is off. */
+        const syncEvents = () => {
+            const on = settings.get_boolean('event-capsules');
+            for (const row of [...rows, dwell, inFullscreen])
+                row.sensitive = on;
+        };
+        settings.connect('changed::event-capsules', syncEvents);
+        syncEvents();
+
         /* -------------------------------------------------------- auto-hide */
         const auto = new Adw.PreferencesGroup({
             title: 'Masquage automatique',

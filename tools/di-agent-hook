@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Report a Claude Code session's state to the Dynamic Island.
+
+Installed as a Claude Code hook. Each invocation reads one hook payload on
+stdin and keeps a small JSON file per session in a state directory the GNOME
+extension watches; the extension draws one robot per file.
+
+The state directory lives under XDG_RUNTIME_DIR, so it is wiped on reboot and
+sessions killed without a Stop hook do not haunt the island forever. The
+extension also ages out anything that has not been touched in a while, since a
+session whose process was killed never reports again.
+
+Hooks must be quiet and fast: this reads one file, writes one file, and exits 0
+whatever happens. A hook that fails loudly would turn a cosmetic feature into a
+broken session.
+"""
+
+import json
+import os
+import re
+import sys
+import time
+
+STALE_STATES = {"running", "waiting"}
+
+
+def state_dir():
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    base = runtime if runtime else os.path.expanduser("~/.cache")
+    path = os.path.join(base, "dynamic-island", "agents")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def safe_id(value):
+    """Session ids come from Claude Code, but they end up in a file name."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "", str(value or ""))
+    return cleaned[:64] or "unknown"
+
+
+def label_for(payload):
+    cwd = payload.get("cwd") or ""
+    name = os.path.basename(cwd.rstrip("/"))
+    return name or "claude"
+
+
+def main():
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        return
+
+    if not isinstance(payload, dict):
+        return
+
+    event = payload.get("hook_event_name") or ""
+    session = safe_id(payload.get("session_id"))
+    path = os.path.join(state_dir(), f"{session}.json")
+
+    if event == "SessionEnd":
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        return
+
+    # Carried over, so a tool call does not reset the subagent count.
+    record = {}
+    try:
+        with open(path) as handle:
+            loaded = json.load(handle)
+            if isinstance(loaded, dict):
+                record = loaded
+    except Exception:
+        pass
+
+    record["session_id"] = session
+    record["label"] = label_for(payload)
+    record["updated"] = int(time.time())
+    record.setdefault("subagents", 0)
+
+    tool = payload.get("tool_name") or ""
+
+    if event == "SessionStart":
+        record["state"] = "idle"
+        record["tool"] = ""
+        record["subagents"] = 0
+    elif event == "UserPromptSubmit":
+        record["state"] = "running"
+        record["tool"] = ""
+    elif event == "PreToolUse":
+        record["state"] = "running"
+        record["tool"] = tool
+        # The Task tool is how a session spawns a subagent, and there is no
+        # hook for a subagent starting -- only for one stopping. Counting the
+        # spawns and decrementing on SubagentStop is the available signal.
+        if tool == "Task":
+            record["subagents"] = int(record.get("subagents", 0)) + 1
+    elif event == "PostToolUse":
+        record["state"] = "running"
+        record["tool"] = ""
+    elif event == "PreCompact":
+        record["state"] = "running"
+        record["tool"] = "compact"
+    elif event == "Notification":
+        # Claude is asking for something: permission, or an answer.
+        record["state"] = "waiting"
+    elif event == "Stop":
+        record["state"] = "done"
+        record["tool"] = ""
+        record["subagents"] = 0
+    elif event == "SubagentStop":
+        record["subagents"] = max(0, int(record.get("subagents", 0)) - 1)
+        record.setdefault("state", "running")
+    else:
+        record.setdefault("state", "running")
+
+    if record.get("state") not in STALE_STATES:
+        record["tool"] = ""
+
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w") as handle:
+            json.dump(record, handle)
+        # Replaced atomically: the extension may read the file at any moment,
+        # and half a JSON document is worse than a stale one.
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        pass
+    sys.exit(0)

@@ -137,6 +137,45 @@
     <!-- Which pane the expanded island reopens on. Written as you scroll, so
          it is deliberately not in WATCHED_KEYS: a pane change must not trigger
          a rebuild of the island it happens inside. -->
+    <!-- Event capsules. The kind toggles are read as each event arrives
+         rather than captured when the monitor starts, so they take effect
+         without rebuilding anything. -->
+    <key name="event-capsules" type="b">
+      <default>true</default>
+      <summary>Let events take the island over briefly</summary>
+    </key>
+
+    <key name="event-dwell" type="i">
+      <default>3200</default>
+      <range min="800" max="10000"/>
+      <summary>How long an event capsule stays on screen, in milliseconds</summary>
+    </key>
+
+    <key name="events-notifications" type="b">
+      <default>true</default>
+      <summary>Show a capsule for notifications</summary>
+    </key>
+
+    <key name="events-power" type="b">
+      <default>true</default>
+      <summary>Show a capsule when the charger is plugged in or out</summary>
+    </key>
+
+    <key name="events-bluetooth" type="b">
+      <default>true</default>
+      <summary>Show a capsule when a Bluetooth device connects</summary>
+    </key>
+
+    <key name="events-timer" type="b">
+      <default>true</default>
+      <summary>Show a capsule when a focus session ends</summary>
+    </key>
+
+    <key name="events-in-fullscreen" type="b">
+      <default>false</default>
+      <summary>Show capsules while the island is hidden over a fullscreen window</summary>
+    </key>
+
     <key name="active-pane" type="s">
       <default>'media'</default>
       <summary>Pane shown when the island unfolds</summary>

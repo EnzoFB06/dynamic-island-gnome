@@ -39,6 +39,7 @@ import {Extension, InjectionManager} from 'resource:///org/gnome/shell/extension
 
 import {PaneDeck} from './panes.js';
 import {SystemPane} from './system.js';
+import {EventCapsule, EventKind, EventMonitor, motifFor} from './events.js';
 
 /* Indicators gathered into the island, in display order. */
 const ISLAND_ROLES = ['dateMenu', 'quickSettings'];
@@ -88,6 +89,14 @@ const DOT_SIZE = 7;
 const AUTOHIDE_SETTLE_MS = 250;
 /* Album art runs to a few tens of kilobytes; well past this it is not a cover. */
 const COVER_MAX_BYTES = 5 * 1024 * 1024;
+/* The capsule is deliberately narrower than the unfolded panel: a passing
+ * event should read as a different shape, not as a half-open island. */
+const CAPSULE_MAX_WIDTH = 300;
+/* A notification raised by the timer's own Main.notify() arrives right
+ * behind the timer event and would say the same thing twice. */
+const TIMER_ECHO_MS = 1500;
+const EVENT_QUEUE_MAX = 3;
+
 const ACCENT_RUNNING = '#6aa9e0';
 const ACCENT_PAUSED = '#e8a44c';
 const RGB_RUNNING = [0x6a / 255, 0xa9 / 255, 0xe0 / 255];
@@ -185,6 +194,33 @@ export default class DynamicIslandExtension extends Extension {
          * assignment, reassert the whole look whenever the theme changes. */
         this._connect(St.ThemeContext.get_for_stage(global.stage), 'changed',
             () => this._apply());
+
+        /* Listening does not depend on the island's shape, so the monitor
+         * outlives every rebuild _apply() does and is torn down only in
+         * disable(). Whether an event is worth showing is decided when it
+         * arrives, from the settings, so the toggles are live. */
+        this._eventQueue = [];
+        this._events = new EventMonitor({
+            onEvent: event => this._onEvent(event),
+            enabledFor: kind => this._eventKindEnabled(kind),
+        });
+        this._events.start();
+    }
+
+    _eventKindEnabled(kind) {
+        switch (kind) {
+        case EventKind.NOTIFICATION:
+            return this._settings.get_boolean('events-notifications');
+        case EventKind.CHARGING:
+        case EventKind.UNPLUGGED:
+            return this._settings.get_boolean('events-power');
+        case EventKind.BLUETOOTH:
+            return this._settings.get_boolean('events-bluetooth');
+        case EventKind.TIMER:
+            return this._settings.get_boolean('events-timer');
+        default:
+            return false;
+        }
     }
 
     disable() {
@@ -205,6 +241,10 @@ export default class DynamicIslandExtension extends Extension {
         this._cancelAllHideTimers();
         this._cancelSyncTimer();
         this._cancelExpandTimer();
+        this._cancelCapsuleTimer();
+        this._events?.stop();
+        this._events = null;
+        this._eventQueue = [];
         this._teardownMpris();
         this._untrackFocusWindow();
         this._setStrut(true);
@@ -739,6 +779,10 @@ export default class DynamicIslandExtension extends Extension {
                 fromHeight + (toHeight - fromHeight) * progress);
 
             this._expandedBox.set_size(width, height);
+            /* Remembered because a pinned box reports its pinned height as its
+             * preferred one, and _measureExpandedHeight() has to put the pin
+             * back exactly as it found it. */
+            this._pinnedSize = {width, height};
             Main.panel.height = this._collapsedHeight() + height;
         };
 
@@ -789,7 +833,7 @@ export default class DynamicIslandExtension extends Extension {
 
     _queueHideUnit(unit) {
         this._cancelHideTimer(unit);
-        if (!this._shouldAutoHide(unit) || this._anyMenuOpen())
+        if (!this._shouldAutoHide(unit) || this._anyMenuOpen() || this._capsuleShown)
             return;
 
         unit.hideTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
@@ -1069,6 +1113,12 @@ export default class DynamicIslandExtension extends Extension {
         this._deck = new PaneDeck({onChanged: () => this._onPaneChanged()});
         this._expandedBox.add_child(this._deck.actor);
 
+        /* The capsule is the deck's alternative, not an addition to it: an
+         * event takes the island over for a few seconds and the panes are put
+         * away, so the island is never two things at once. */
+        this._capsule = new EventCapsule();
+        this._expandedBox.add_child(this._capsule.actor);
+
         this._deck.add({id: 'media', name: 'Lecture', actor: this._buildMediaPane()});
         this._deck.add({id: 'focus', name: 'Focus', actor: this._buildTimer()});
 
@@ -1168,12 +1218,14 @@ export default class DynamicIslandExtension extends Extension {
      * px answers 240. Release it, ask, pin it straight back: nothing is
      * allocated in between, so the release is never drawn. */
     _measureExpandedHeight(forWidth) {
-        const width = this._expandedBox.width;
-        const height = this._expandedBox.height;
+        const pinned = this._pinnedSize;
 
         this._expandedBox.set_size(-1, -1);
         const [, natural] = this._expandedBox.get_preferred_height(forWidth);
-        this._expandedBox.set_size(width, height);
+
+        if (pinned)
+            this._expandedBox.set_size(pinned.width, pinned.height);
+        this._pinnedSize = pinned;
 
         return natural;
     }
@@ -1472,8 +1524,10 @@ export default class DynamicIslandExtension extends Extension {
                     this._timerTick = 0;
                     this._timerRunning = false;
                     this._syncTimer();
+                    const minutes = this._settings.get_int('focus-duration');
+                    this._events?.emitTimerDone(`${minutes} min de focus`);
                     Main.notify('Session de focus terminee',
-                        `${this._settings.get_int('focus-duration')} minutes de focus.`);
+                        `${minutes} minutes de focus.`);
                     return GLib.SOURCE_REMOVE;
                 }
 
@@ -1598,6 +1652,10 @@ export default class DynamicIslandExtension extends Extension {
         this._deck?.destroy();
         this._deck = null;
 
+        this._capsule?.destroy();
+        this._capsule = null;
+        this._capsuleShown = false;
+
         /* The indicators have to be out before this subtree goes, or they are
          * destroyed along with it. */
         if (this._islandBody) {
@@ -1666,6 +1724,13 @@ export default class DynamicIslandExtension extends Extension {
         if (!this._expandedBox || this._expanded)
             return;
 
+        /* Hovering a capsule promotes it to the full panel rather than waiting
+         * for it to time out: the growth then starts from the capsule's own
+         * size, so the island widens from where it already is. */
+        const fromCapsule = this._capsuleShown;
+        if (fromCapsule)
+            this._putCapsuleAway();
+
         this._expanded = true;
         this._updateMedia();
 
@@ -1675,10 +1740,13 @@ export default class DynamicIslandExtension extends Extension {
         /* Measure the unfolded content before it is on screen, so the growth has
          * a real target rather than a guess. */
         this._expandedBox.show();
-        const [, naturalHeight] = this._expandedBox.get_preferred_height(targetWidth);
-        const [, collapsedWidth] = this._topRow.get_preferred_width(-1);
+        const naturalHeight = this._measureExpandedHeight(targetWidth);
+        const [, pillWidth] = this._topRow.get_preferred_width(-1);
 
-        this._expandedBox.set_size(collapsedWidth, 0);
+        const collapsedWidth = fromCapsule ? this._expandedBox.width : pillWidth;
+        const fromHeight = fromCapsule ? this._expandedBox.height : 0;
+
+        this._expandedBox.set_size(collapsedWidth, fromHeight);
 
         /* The content fades in behind the growth, so nothing is drawn before
          * there is room for it. Opacity is safe to ease: it changes no layout. */
@@ -1693,7 +1761,7 @@ export default class DynamicIslandExtension extends Extension {
         /* EASE_OUT_EXPO covered a quarter of the growth in its first frame --
          * measured at 98 px in one frame -- which read as a jolt rather than a
          * movement. Cubic ramps in gently and still settles softly. */
-        this._animateGeometry(collapsedWidth, targetWidth, 0, naturalHeight,
+        this._animateGeometry(collapsedWidth, targetWidth, fromHeight, naturalHeight,
             duration, Clutter.AnimationMode.EASE_OUT_CUBIC);
     }
 
@@ -1724,7 +1792,143 @@ export default class DynamicIslandExtension extends Extension {
                 /* Hand the sizing back to the top row so the pill settles on
                  * its natural collapsed width. */
                 this._expandedBox?.set_size(-1, -1);
+                this._pinnedSize = null;
             });
+    }
+
+    /* ------------------------------------------------------------- events */
+
+    /* Four things are worth interrupting for, and each arrives with its own
+     * motion. The island takes a short, wide shape -- the capsule -- says what
+     * happened, and goes back to being a pill.
+     *
+     * Events are queued rather than overwritten. Plugging in a charger while a
+     * notification is still on screen is two pieces of news, and showing the
+     * second one in place of the first loses the first entirely. */
+    _onEvent(event) {
+        if (!this._expandedBox || !this._settings.get_boolean('event-capsules'))
+            return;
+
+        /* The timer raises a real notification as well, for the tray. It says
+         * the same thing as the capsule that just played, so it is dropped. */
+        if (event.kind === EventKind.NOTIFICATION && this._lastTimerEvent &&
+            GLib.get_monotonic_time() - this._lastTimerEvent < TIMER_ECHO_MS * 1000)
+            return;
+
+        if (event.kind === EventKind.TIMER)
+            this._lastTimerEvent = GLib.get_monotonic_time();
+
+        /* Somebody looking at the panes already has the island open; stealing it
+         * back for a banner would close whatever they were reading. */
+        if (this._expanded)
+            return;
+
+        /* Tucked away over a fullscreen window: by default that silence is the
+         * point, and a capsule would be exactly the interruption the auto-hide
+         * is there to avoid. */
+        const primary = this._units?.find(u => u.isPrimary);
+        if (primary && !primary.revealed &&
+            !this._settings.get_boolean('events-in-fullscreen'))
+            return;
+
+        this._eventQueue ??= [];
+        if (this._eventQueue.length >= EVENT_QUEUE_MAX)
+            return;
+
+        this._eventQueue.push(event);
+        this._pumpEvents();
+    }
+
+    _pumpEvents() {
+        if (this._capsuleShown || this._expanded)
+            return;
+
+        const event = this._eventQueue?.shift();
+        if (!event)
+            return;
+
+        this._cancelExpandTimer();
+        this._cancelCollapseTimer();
+        this._cancelCapsuleTimer();
+
+        this._capsuleShown = true;
+        this._deck.actor.hide();
+        this._capsule.show(event, {ringDots: this._settings.get_int('ring-dots')});
+
+        const duration = this._settings.get_int('animation-duration');
+        const motif = motifFor(event.kind);
+        const targetWidth = Math.min(
+            this._settings.get_int('shelf-width'), CAPSULE_MAX_WIDTH);
+
+        this._expandedBox.show();
+        const naturalHeight = this._measureExpandedHeight(targetWidth);
+        const [, pillWidth] = this._topRow.get_preferred_width(-1);
+
+        this._expandedBox.set_size(pillWidth, 0);
+        this._expandedBox.remove_all_transitions();
+        this._expandedBox.ease({
+            opacity: 255,
+            duration: Math.round(duration * 0.6),
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+
+        this._animateGeometry(pillWidth, targetWidth, 0, naturalHeight,
+            duration, motif.mode);
+
+        this._capsuleTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+            this._settings.get_int('event-dwell'), () => {
+                this._capsuleTimer = 0;
+                this._dismissCapsule();
+                return GLib.SOURCE_REMOVE;
+            });
+    }
+
+    /* Takes the capsule off screen without animating: used when the hover
+     * expansion takes over, where the island keeps growing from where the
+     * capsule left it and must not be seen to shrink first. */
+    _putCapsuleAway() {
+        this._cancelCapsuleTimer();
+        this._capsuleShown = false;
+        this._capsule?.hide();
+        this._deck?.actor.show();
+    }
+
+    _dismissCapsule() {
+        if (!this._capsuleShown || !this._expandedBox)
+            return;
+
+        const duration = this._settings.get_int('animation-duration');
+        const [, pillWidth] = this._topRow.get_preferred_width(-1);
+
+        this._expandedBox.remove_all_transitions();
+        this._expandedBox.ease({
+            opacity: 0,
+            duration: Math.round(duration * 0.5),
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+
+        this._animateGeometry(this._expandedBox.width, pillWidth,
+            this._expandedBox.height, 0, duration,
+            Clutter.AnimationMode.EASE_IN_OUT_CUBIC, () => {
+                this._putCapsuleAway();
+                this._expandedBox?.hide();
+                this._expandedBox?.set_size(-1, -1);
+                this._pinnedSize = null;
+
+                /* The island was revealed to show this; if it is only on screen
+                 * for the capsule, let the auto-hide have it back. */
+                for (const unit of this._units ?? [])
+                    this._queueHideUnit(unit);
+
+                this._pumpEvents();
+            });
+    }
+
+    _cancelCapsuleTimer() {
+        if (this._capsuleTimer) {
+            GLib.Source.remove(this._capsuleTimer);
+            this._capsuleTimer = 0;
+        }
     }
 
     /* ---------------------------------------------------------------- media */
