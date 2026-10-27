@@ -89,13 +89,30 @@ The panes:
 
 ## Events
 
-Four things take the island over for a few seconds, each with its own motion: a
-notification ripples outward, a charger fills a ring, a Bluetooth device sends
-arcs, and a finished focus session throws its ring's dots off the edge. Events
-are queued rather than overwritten, never interrupt an island you have open, and
-stay out of the way while the island is hidden over a fullscreen window unless
-you ask otherwise. Do Not Disturb silences the notification capsule, because it
-is a banner in all but name.
+Four things are worth interrupting for, each with its own motion: a notification
+ripples outward, a charger fills a ring, a Bluetooth device sends arcs, and a
+finished focus session throws its ring's dots off the edge.
+
+They do not deform the island. Each gets a **detached capsule** -- a pill of its
+own, floating below the top edge -- which is what lets a notification appear
+while the island itself is tucked away over a fullscreen window: the two are
+separate chrome actors, and only one of them is hiding.
+
+The capsule plays in three acts, after
+[ActivSpot](https://github.com/Devvvmn/ActivSpot)'s notification island:
+
+1. **full** — wide, with the icon, the title and the body, held long enough to
+   read;
+2. **compact** — it draws in to a small pill carrying the icon and one line, and
+   lingers there, the part you catch out of the corner of your eye after you
+   have stopped reading;
+3. **away** — it lifts, shrinks and fades.
+
+Hovering holds whichever act it is in; clicking activates the notification the
+way clicking the shell's own banner does. Events queue rather than overwrite,
+and the capsule shows exactly the set the shell would have bannered -- the same
+policy tests, so a muted application or a low-urgency background update stays
+quiet here too.
 
 ## Claude Code agents
 

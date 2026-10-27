@@ -146,9 +146,15 @@
     </key>
 
     <key name="event-dwell" type="i">
-      <default>3200</default>
+      <default>3600</default>
       <range min="800" max="10000"/>
-      <summary>How long an event capsule stays on screen, in milliseconds</summary>
+      <summary>How long the full capsule stays before it draws in, in milliseconds</summary>
+    </key>
+
+    <key name="event-compact-dwell" type="i">
+      <default>4500</default>
+      <range min="0" max="30000"/>
+      <summary>How long the compact capsule lingers afterwards, in milliseconds</summary>
     </key>
 
     <key name="events-notifications" type="b">
@@ -171,9 +177,12 @@
       <summary>Show a capsule when a focus session ends</summary>
     </key>
 
+    <!-- The capsule is its own chrome actor now and does not hide with the
+         island, so this is about fullscreen windows alone. True by default:
+         a notification you cannot see is a notification you have missed. -->
     <key name="events-in-fullscreen" type="b">
-      <default>false</default>
-      <summary>Show capsules while the island is hidden over a fullscreen window</summary>
+      <default>true</default>
+      <summary>Show capsules over fullscreen windows</summary>
     </key>
 
     <key name="active-pane" type="s">

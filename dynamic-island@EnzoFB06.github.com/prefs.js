@@ -160,13 +160,20 @@ export default class DynamicIslandPreferences extends ExtensionPreferences {
         }
 
         const dwell = this._spin(settings, 'event-dwell',
-            'Dur\u00e9e d\u2019affichage', 'En millisecondes.', 800, 10000);
+            'Dur\u00e9e de la grande capsule',
+            'Avant qu\u2019elle ne se resserre, en millisecondes.', 800, 10000);
         events.add(dwell);
+
+        const compact = this._spin(settings, 'event-compact-dwell',
+            'Dur\u00e9e de la petite capsule',
+            'Le rappel d\u2019une ligne qui subsiste ensuite. 0 pour la supprimer.',
+            0, 30000);
+        events.add(compact);
 
         const inFullscreen = new Adw.SwitchRow({
             title: 'Aussi en plein \u00e9cran',
-            subtitle: 'Par d\u00e9faut non : quand l\u2019encoche s\u2019est effac\u00e9e devant une '
-                + 'fen\u00eatre en plein \u00e9cran, ce silence est volontaire.',
+            subtitle: 'La capsule est d\u00e9tach\u00e9e de l\u2019encoche et ne se cache '
+                + 'plus avec elle ; il ne reste que le cas du plein \u00e9cran.',
         });
         settings.bind('events-in-fullscreen', inFullscreen, 'active',
             Gio.SettingsBindFlags.DEFAULT);
@@ -175,7 +182,7 @@ export default class DynamicIslandPreferences extends ExtensionPreferences {
         /* The per-kind switches say nothing while the whole feature is off. */
         const syncEvents = () => {
             const on = settings.get_boolean('event-capsules');
-            for (const row of [...rows, dwell, inFullscreen])
+            for (const row of [...rows, dwell, compact, inFullscreen])
                 row.sensitive = on;
         };
         settings.connect('changed::event-capsules', syncEvents);
