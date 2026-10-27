@@ -20,8 +20,15 @@ const DOT_SIZE = 5;
 const DOT_ACTIVE_WIDTH = 14;
 const DOT_FADE_MS = 160;
 
+/* How far the arriving pane travels. Translation, not layout: it moves the
+ * actor for drawing without changing what it asks for, so the island can be
+ * measuring and morphing its height at the same time without the two fighting.
+ * Enough to read as a direction, not so much that the pane appears to come
+ * from outside the island. */
+const SLIDE_PX = 22;
+
 export class PaneDeck {
-    constructor({onChanged, fadeDuration = 120} = {}) {
+    constructor({onChanged, fadeDuration = 220} = {}) {
         this._panes = [];
         this._activeId = null;
         /* A pane's onShow/onHide mean "you are on screen", not "you are
@@ -144,33 +151,51 @@ export class PaneDeck {
             return false;
 
         const previous = this.active;
+
+        /* The wheel turns one way or the other, and the pane arrives from the
+         * side the wheel came from: scrolling down brings the next pane up from
+         * below. Without that, every switch looks the same and the deck gives
+         * no sense of where you are in it. */
+        const from = this._panes.indexOf(previous);
+        const to = this._panes.indexOf(next);
+        const direction = from < 0 || to > from ? 1 : -1;
+
         this._activeId = id;
 
         if (previous) {
             if (this._live)
                 previous.onHide?.();
             previous.actor.remove_all_transitions();
+            /* Taken off screen at once rather than faded out. The deck measures
+             * itself from its visible children -- BinLayout skips the rest --
+             * and the island reads that height the moment this call returns, so
+             * a pane lingering on its way out would be measured as if it had
+             * stayed and the island would morph to the wrong size. */
             previous.actor.visible = false;
             previous.actor.opacity = 255;
+            previous.actor.translation_y = 0;
         }
 
         next.actor.visible = true;
         if (this._live)
             next.onShow?.();
 
-        /* The pane fades in on the spot while the island morphs around it. A
-         * slide would have to be clipped against a box that is still resizing,
-         * and the two motions read as one jolt rather than two. */
+        /* The arriving pane rises into place as it fades in, while the island
+         * morphs its height around it. Both are eased out, so they settle
+         * together rather than one landing before the other. */
         if (animate) {
             next.actor.remove_all_transitions();
             next.actor.opacity = 0;
+            next.actor.translation_y = direction * SLIDE_PX;
             next.actor.ease({
                 opacity: 255,
+                translation_y: 0,
                 duration: this._fadeDuration,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
             });
         } else {
             next.actor.opacity = 255;
+            next.actor.translation_y = 0;
         }
 
         this._syncDots();

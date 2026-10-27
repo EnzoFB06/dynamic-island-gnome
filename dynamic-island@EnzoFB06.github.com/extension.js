@@ -129,6 +129,7 @@ export default class DynamicIslandExtension extends Extension {
          * land straight in the centre box instead of the island's top row. */
         this._buildIslandBody();
         this._gatherIndicators();
+        this._layoutTopRow();
         this._setupMpris();
         this._trackFocusWindow();
         this._apply();
@@ -138,6 +139,7 @@ export default class DynamicIslandExtension extends Extension {
          * box and re-shows what we hid. Reclaim it afterwards. */
         this._connect(Main.sessionMode, 'updated', () => {
             this._gatherIndicators();
+            this._layoutTopRow();
             this._apply();
         });
 
@@ -1103,6 +1105,16 @@ export default class DynamicIslandExtension extends Extension {
         this._topRow = new St.BoxLayout({name: 'dynamicIslandTopRow'});
         this._islandBody.add_child(this._topRow);
 
+        /* The clock belongs on the left and the status icons on the right, the
+         * way they sit in a real panel. Collapsed, the pill is exactly as wide
+         * as this row and there is nothing to distribute; unfolded, the island
+         * is far wider and the slack has to go somewhere. It goes here, between
+         * the two, rather than onto the shell's own containers -- those are
+         * borrowed, and giving them expansion flags would be one more thing to
+         * put back in disable(). */
+        this._topSpacer = new St.Widget({x_expand: true});
+        this._topRow.add_child(this._topSpacer);
+
         this._expandedBox = new St.BoxLayout({
             name: 'dynamicIslandExpanded',
             orientation: Clutter.Orientation.VERTICAL,
@@ -1613,14 +1625,41 @@ export default class DynamicIslandExtension extends Extension {
             y_align: Clutter.ActorAlign.CENTER,
             visible: false,
         });
-        this._topRow.insert_child_at_index(this._timerDot, 0);
+        this._topRow.add_child(this._timerDot);
     }
 
-    /* Appended, so the indicators that _gatherIndicators() inserts at the front
-     * push it to the right-hand end of the pill. */
+    /* Added plainly; _layoutTopRow() decides where it ends up. */
     _buildAgentStrip() {
         this._agentStrip = new AgentStrip();
         this._topRow.add_child(this._agentStrip.actor);
+    }
+
+    /* The row is assembled from three directions -- the dot and the strip are
+     * ours, the clock and the control centre are the shell's and get reclaimed
+     * on every session mode change -- so rather than each builder guessing at
+     * an index, they all just add themselves and the order is settled here.
+     *
+     * Clock, slack, then everything else pushed against the right edge, with
+     * the control centre last as it is in the panel this replaces. */
+    _layoutTopRow() {
+        if (!this._topRow)
+            return;
+
+        const panel = Main.panel;
+        const order = [
+            panel.statusArea.dateMenu?.container,
+            this._topSpacer,
+            this._timerDot,
+            this._agentStrip?.actor,
+            panel.statusArea.quickSettings?.container,
+        ];
+
+        let index = 0;
+        for (const actor of order) {
+            if (actor?.get_parent() !== this._topRow)
+                continue;
+            this._topRow.set_child_at_index(actor, index++);
+        }
     }
 
     _timerToggleRun() {
@@ -1783,6 +1822,7 @@ export default class DynamicIslandExtension extends Extension {
         }
 
         this._topRow = null;
+        this._topSpacer = null;
         this._expandedBox = null;
         this._expanded = false;
     }
@@ -2311,11 +2351,20 @@ export default class DynamicIslandExtension extends Extension {
                     this._origin.set(role, {
                         parent,
                         index: parent.get_children().indexOf(container),
+                        expand: container.x_expand,
                     });
                 }
                 parent?.remove_child(container);
                 centerBox.insert_child_at_index(container, position);
             }
+
+            /* In the panel these containers expand, which is how the clock ends
+             * up centred in a box the width of the screen. In the island that
+             * same flag makes them share the slack with our spacer, so the
+             * clock drifts towards the middle as the island grows instead of
+             * staying against the left edge. The original value is remembered
+             * and put back in _restoreIndicators(). */
+            container.x_expand = false;
 
             container.show();
         });
@@ -2336,6 +2385,8 @@ export default class DynamicIslandExtension extends Extension {
                     host.remove_child(container);
 
                 const origin = this._origin.get(role);
+                if (origin)
+                    container.x_expand = origin.expand;
                 if (origin?.parent && !container.get_parent())
                     origin.parent.insert_child_at_index(container, origin.index);
             } catch (e) {
