@@ -691,6 +691,11 @@ export default class DynamicIslandExtension extends Extension {
             unit.edge.set_position(x, monitor.y);
 
         unit.edge.show();
+
+        /* The strip follows the island's width, so it moves out from under a
+         * pointer that has not moved -- another way for the flag to end up
+         * describing a position that is no longer true. */
+        this._syncHover(unit.edge);
     }
 
     /* Opening the clock or the control centre moves the pointer off the island
@@ -776,6 +781,12 @@ export default class DynamicIslandExtension extends Extension {
             unit.edge.reactive = autoHide;
             unit.island.reactive = true;
 
+            /* Reactivity has just changed under a pointer that may be
+             * anywhere. Re-derive both flags rather than trusting what the
+             * last crossing event left behind. */
+            this._syncHover(unit.edge);
+            this._syncHover(unit.island);
+
             if (!autoHide) {
                 this._cancelHideTimer(unit);
                 this._revealUnit(unit);
@@ -787,6 +798,45 @@ export default class DynamicIslandExtension extends Extension {
             else
                 this._hideUnit(unit);
         }
+
+        /* Self-correcting, deliberately. Collapsing is otherwise driven purely
+         * by hover transitions, so a single missed transition strands the
+         * island open until something else happens to move the pointer across
+         * it. Checking the condition rather than the event means the island
+         * recovers by itself. */
+        const hovered = this._units.some(u => u.island.hover || u.edge.hover);
+        if (this._expanded && !hovered)
+            this._queueCollapse();
+    }
+
+    /* St.Widget tracks hover from crossing events, and an actor that stops
+     * being reactive underneath the pointer never gets the leave event that
+     * would clear the flag. _syncAutoHide() toggles the strip's reactivity
+     * every time a window is maximized, so the strip latches "hovered" with
+     * the pointer anywhere on screen -- and since a collapse is only ever
+     * queued on a hover transition that will now never come, the island stays
+     * unfolded for good and never hides over the maximized window either.
+     *
+     * St.Widget.sync_hover() is the documented remedy and it does not work
+     * here: it asks Clutter which actor the pointer is over, and Clutter's own
+     * answer is stale for exactly the actor this happened to. Measured --
+     * pointer 600 px below the strip, sync_hover() left hover true, assigning
+     * it false collapsed the island on the spot.
+     *
+     * So the question is answered from geometry, which cannot go stale. */
+    _syncHover(actor) {
+        if (!actor?.reactive) {
+            if (actor)
+                actor.hover = false;
+            return;
+        }
+
+        const [pointerX, pointerY] = global.get_pointer();
+        const [x, y] = actor.get_transformed_position();
+
+        actor.hover =
+            pointerX >= x && pointerX < x + actor.width &&
+            pointerY >= y && pointerY < y + actor.height;
     }
 
     _revealUnit(unit) {
