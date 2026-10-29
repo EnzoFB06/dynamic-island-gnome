@@ -1055,7 +1055,8 @@ export default class DynamicIslandExtension extends Extension {
         Promise.all([
             import(`file://${ext.path}/autohide.js`),
             import(`file://${ext.path}/dock.js`),
-        ]).then(([autohide, dock]) => {
+            import(`file://${ext.path}/animator.js`),
+        ]).then(([autohide, dock, animator]) => {
             /* We may have been disabled while those imports resolved. */
             if (!this._injections)
                 return;
@@ -1072,6 +1073,15 @@ export default class DynamicIslandExtension extends Extension {
                 self => self._monitor);
             this._unguard(dock?.Dock?.prototype, '_onEnterEvent',
                 self => self._monitor);
+
+            /* The fourth place that asks, and the one that was missed: the
+             * render loop forces "the pointer is not over the dock" on a
+             * fullscreen monitor, so the icons stop responding to the pointer
+             * entirely while a window is merely maximized. This one runs every
+             * frame, which is why the guard checks the flag before it does
+             * anything -- outside fullscreen it costs a property read. */
+            this._unguard(animator?.Animator?.prototype, 'animate',
+                self => self.dock?.getMonitor?.());
         }).catch(e => {
             logError(e, 'dynamic-island: could not adapt dash2dock-lite');
         });
