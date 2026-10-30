@@ -105,15 +105,32 @@ export default class DynamicIslandPreferences extends ExtensionPreferences {
         });
         page.add(timer);
 
-        timer.add(this._spin(settings, 'focus-duration', 'Duree d\u2019une session',
-            'En minutes.', 1, 180));
+        /* Stored in seconds so the island can hold 1:30; shown in minutes,
+         * which is the unit anyone setting a session thinks in. The island
+         * itself has presets, a scroll on the ring and a field you type into,
+         * so this row is the long way round -- it exists for completeness. */
+        const duration = new Adw.SpinRow({
+            title: 'Duree d\u2019une session',
+            subtitle: 'En minutes. Dans l\u2019encoche : les prereglages, la molette sur '
+                + 'l\u2019anneau, ou un clic sur le temps pour le saisir.',
+            adjustment: new Gtk.Adjustment({
+                lower: 1, upper: 1440, step_increment: 1, page_increment: 5,
+            }),
+        });
+        duration.value = Math.round(settings.get_int('focus-seconds') / 60);
+        duration.connect('notify::value',
+            () => settings.set_int('focus-seconds', Math.round(duration.value) * 60));
+        settings.connect('changed::focus-seconds', () => {
+            const minutes = Math.round(settings.get_int('focus-seconds') / 60);
+            if (Math.round(duration.value) !== minutes)
+                duration.value = minutes;
+        });
+        timer.add(duration);
 
-        timer.add(this._spin(settings, 'duration-step', 'Pas des boutons − et +',
-            'En minutes.', 1, 30));
-
-        timer.add(this._spin(settings, 'ring-dots', 'Nombre de ronds sur l\u2019anneau',
-            'Chaque rond vaut la duree divisee par ce nombre, et s\u2019eteint quand sa part '
-            + 'est ecoulee.', 4, 60));
+        timer.add(this._spin(settings, 'ring-dots',
+            'Ronds de la fin de session',
+            'Le nombre de ronds que l\u2019anneau projette vers l\u2019exterieur quand une '
+            + 'session se termine.', 4, 60));
 
         const corners = new Adw.SwitchRow({
             title: 'Coins concaves',

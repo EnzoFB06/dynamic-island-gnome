@@ -227,11 +227,6 @@
     </key>
 
 
-    <key name="focus-duration" type="i">
-      <default>25</default>
-      <range min="1" max="180"/>
-      <summary>Length of a focus session, in minutes</summary>
-    </key>
 
     <key name="concave-corners" type="b">
       <default>true</default>
@@ -240,6 +235,14 @@
     </key>
 
 
+    <!-- Seconds, not minutes. A length you can type needs to express 1:30,
+         and storing minutes made the smallest step a minute by construction. -->
+    <key name="focus-seconds" type="i">
+      <default>2700</default>
+      <range min="30" max="86400"/>
+      <summary>Length of a focus session, in seconds</summary>
+    </key>
+
     <key name="ring-dots" type="i">
       <default>12</default>
       <range min="4" max="60"/>
@@ -247,12 +250,6 @@
       <description>Each dot stands for the session length divided by this count, and goes dark once its share has elapsed. A fixed count rather than one dot per minute, so the ring stays readable at any duration.</description>
     </key>
 
-    <key name="duration-step" type="i">
-      <default>5</default>
-      <range min="1" max="30"/>
-      <summary>Minutes added or removed by the plus and minus buttons</summary>
-      <description>Scrolling on the ring always moves by a single minute, for fine adjustment.</description>
-    </key>
 
   </schema>
 </schemalist>

@@ -312,49 +312,105 @@
  * sets JetBrains Mono, but a shell extension has no business overriding the
  * desktop's own interface font. */
 #dynamicIslandCapsule .di-capsule {
-  color: #cdd6f4;
+  color: #ffffff;
 }
 
-/* The reference gives its expanded island 12 px of margin all round and a
- * fixed 110 px of height. Here the height is measured, so the margin is what
- * keeps the three lines off the edges. */
 #dynamicIslandCapsule .di-capsule-full {
-  spacing: 12px;
-  padding: 12px;
+  spacing: 10px;
+  padding: 10px;
 }
 
 #dynamicIslandCapsule .di-capsule-compact {
-  spacing: 8px;
-  padding: 0 14px;
+  spacing: 7px;
+  padding: 0 11px;
 }
 
 #dynamicIslandCapsule .di-capsule-icon {
-  color: #cdd6f4;
+  color: #ffffff;
 }
 
 #dynamicIslandCapsule .di-capsule-text {
-  spacing: 3px;
+  spacing: 2px;
 }
 
 #dynamicIslandCapsule .di-capsule-app {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
-  color: #7f849c;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 #dynamicIslandCapsule .di-capsule-title {
-  font-size: 14px;
+  font-size: 12.5px;
   font-weight: bold;
-  color: #cdd6f4;
+  color: #ffffff;
 }
 
 /* One line, centred, a size down: the reminder of what went past. */
 #dynamicIslandCapsule .di-capsule-title-compact {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
 }
 
 #dynamicIslandCapsule .di-capsule-body {
-  font-size: 12px;
-  color: #a6adc8;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+/* ---------------------------------------------------------- timer input ---
+ * The length is set three ways and they share one look: the presets are the
+ * quick picks, the time in the middle of the ring is a field you can type
+ * into, and a scroll on the ring nudges it by a minute. */
+#dynamicIslandExpanded .di-presets {
+  spacing: 4px;
+  padding-top: 3px;
+}
+
+#dynamicIslandExpanded .di-preset {
+  font-size: 0.72em;
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.75);
+  background-color: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 2px 8px;
+  min-width: 16px;
+}
+
+#dynamicIslandExpanded .di-preset:hover {
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+/* The length currently set. Checked rather than a separate class, so the
+ * state lives where St already keeps button state. */
+#dynamicIslandExpanded .di-preset:checked {
+  background-color: rgba(106, 169, 224, 0.9);
+  color: #ffffff;
+}
+
+#dynamicIslandExpanded .di-preset:insensitive {
+  color: rgba(255, 255, 255, 0.3);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* The time sits in the middle of the ring and is a button; it should not look
+ * like one until you are over it. */
+#dynamicIslandExpanded .di-timer-time {
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+#dynamicIslandExpanded .di-timer-time:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+#dynamicIslandExpanded .di-timer-entry {
+  font-size: 0.95em;
+  font-weight: bold;
+  color: #ffffff;
+  width: 54px;
+  padding: 1px 4px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.16);
+  caret-color: #ffffff;
+  selection-background-color: rgba(106, 169, 224, 0.8);
 }

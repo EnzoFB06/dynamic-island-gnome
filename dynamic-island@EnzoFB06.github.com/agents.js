@@ -39,7 +39,13 @@ const RESCAN_DEBOUNCE_MS = 150;
  * longer -- they are alive and idle, and their file is removed when the session
  * actually ends. */
 const STALE_ACTIVE_S = 3600;
-const STALE_IDLE_S = 12 * 3600;
+
+/* A finished agent is shown just long enough for the pose to register, then it
+ * goes. Left on the list it is not information any more -- a session you closed
+ * an hour ago reports "terminé" exactly as loudly as one that finished while
+ * you were looking at it. The same applies to a session that has started and
+ * been asked nothing yet. */
+const DONE_GRACE_S = 6;
 
 const CORAL = [0xd9 / 255, 0x77 / 255, 0x57 / 255];
 const FACE = [0x2a / 255, 0x17 / 255, 0x10 / 255];
@@ -249,6 +255,7 @@ export class AgentWatcher {
         this._onChanged = onChanged;
         this._monitor = null;
         this._debounce = 0;
+        this._expiry = 0;
         this.agents = [];
         this.dirExists = false;
     }
@@ -286,6 +293,7 @@ export class AgentWatcher {
         const path = agentStateDir();
         const dir = Gio.File.new_for_path(path);
         const agents = [];
+        let soonest = Infinity;
 
         this.dirExists = dir.query_exists(null);
 
@@ -314,11 +322,17 @@ export class AgentWatcher {
                  * all that is left of it. Age it out rather than drawing a
                  * robot that will never move. */
                 const age = now - agent.updated;
-                const limit = (agent.state === 'running' || agent.state === 'waiting')
-                    ? STALE_ACTIVE_S
-                    : STALE_IDLE_S;
+                const working = agent.state === 'running' || agent.state === 'waiting';
+                const limit = working ? STALE_ACTIVE_S : DONE_GRACE_S;
+
                 if (agent.updated > 0 && age > limit)
                     continue;
+
+                /* Nothing will touch the file again, so nothing would prompt
+                 * the rescan that drops this robot once its moment is up. Ask
+                 * for one at exactly that moment. */
+                if (!working && agent.updated > 0)
+                    soonest = Math.min(soonest, limit - age);
 
                 agents.push(agent);
             }
@@ -331,7 +345,25 @@ export class AgentWatcher {
         });
 
         this.agents = agents;
+        this._scheduleExpiry(soonest);
         this._onChanged?.(agents);
+    }
+
+    _scheduleExpiry(seconds) {
+        if (this._expiry) {
+            GLib.Source.remove(this._expiry);
+            this._expiry = 0;
+        }
+
+        if (!Number.isFinite(seconds))
+            return;
+
+        const delay = Math.max(250, Math.round(seconds * 1000) + 100);
+        this._expiry = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+            this._expiry = 0;
+            this.rescan();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _read(path) {
@@ -378,6 +410,11 @@ export class AgentWatcher {
         if (this._debounce) {
             GLib.Source.remove(this._debounce);
             this._debounce = 0;
+        }
+
+        if (this._expiry) {
+            GLib.Source.remove(this._expiry);
+            this._expiry = 0;
         }
 
         this._monitor?.cancel();

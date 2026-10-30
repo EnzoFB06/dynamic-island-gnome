@@ -42,13 +42,18 @@ export const CAPSULE_ACTOR_NAME = 'dynamicIslandCapsule';
 
 const BLUR_EFFECT_NAME = 'dynamic-island-capsule-blur';
 
-/* Catppuccin Mocha, the palette ActivSpot falls back to when matugen has not
- * written one. Only the handful the notification uses. */
-const BASE = '30, 30, 46';         /* #1e1e2e */
-const SURFACE0 = '#313244';
-const SURFACE1 = '#45475a';
-const MAUVE = '203, 166, 247';     /* #cba6f7 */
-const TEXT_RGB = '205, 214, 244';  /* #cdd6f4 */
+/* The island's own palette, not the reference's. ActivSpot runs on Catppuccin
+ * Mocha, whose base is #1e1e2e -- the blue in that third channel is what made
+ * the capsule read as a different object from the island rather than a smaller
+ * one. Neutral smoky grey instead, and white at varying alpha for everything
+ * drawn on it, which is how the island is painted. */
+const BASE = '28, 28, 30';
+const TILE_FULL = 'rgba(255, 255, 255, 0.10)';
+const TILE_COMPACT = 'rgba(255, 255, 255, 0.14)';
+const EDGE_FULL = 'rgba(255, 255, 255, 0.16)';
+const EDGE_COMPACT = 'rgba(255, 255, 255, 0.11)';
+/* Thick enough to read as an edge rather than an artefact of antialiasing. */
+const EDGE_WIDTH = 2;
 
 /* Eight pixels below the top edge: the island's own place, which the island
  * gives up while a capsule is showing. */
@@ -63,16 +68,16 @@ const SLIDE_MS = 320;
 const FADE_MS = 200;
 const AWAY_MS = 300;
 
-const FULL_WIDTH = 420;
-const FULL_MIN_HEIGHT = 96;
-const FULL_MAX_HEIGHT = 130;
+const FULL_WIDTH = 360;
+const FULL_MIN_HEIGHT = 76;
+const FULL_MAX_HEIGHT = 112;
 
-const COMPACT_HEIGHT = 44;
-const COMPACT_MIN_WIDTH = 180;
-const COMPACT_MAX_WIDTH = 320;
+const COMPACT_HEIGHT = 34;
+const COMPACT_MIN_WIDTH = 150;
+const COMPACT_MAX_WIDTH = 270;
 
-const ICON_TILE_FULL = 48;
-const ICON_TILE_COMPACT = 24;
+const ICON_TILE_FULL = 38;
+const ICON_TILE_COMPACT = 20;
 
 const GLYPH_MS = 1150;
 
@@ -417,8 +422,8 @@ export class DetachedCapsule {
         const full = phase === Phase.FULL;
 
         this._phaseStyle = full
-            ? {alpha: 0.95, border: `rgba(${MAUVE}, 0.4)`}
-            : {alpha: 0.88, border: `rgba(${TEXT_RGB}, 0.08)`};
+            ? {alpha: 0.95, border: EDGE_FULL}
+            : {alpha: 0.9, border: EDGE_COMPACT};
 
         this._applyBackground();
 
@@ -429,12 +434,12 @@ export class DetachedCapsule {
         const tile = full ? ICON_TILE_FULL : ICON_TILE_COMPACT;
         this._iconTile.set_size(tile, tile);
         this._iconTile.set_style(
-            `background-color: ${full ? SURFACE0 : SURFACE1};` +
-            ` border-radius: ${full ? 12 : 6}px;`);
+            `background-color: ${full ? TILE_FULL : TILE_COMPACT};` +
+            ` border-radius: ${full ? 10 : 6}px;`);
 
         this._glyph.set_size(tile, tile);
         this._glyph.visible = full;
-        this._icon.icon_size = full ? 26 : 14;
+        this._icon.icon_size = full ? 21 : 12;
 
         /* Compact carries one line and is centred; full is a left-aligned
          * block of three. */
@@ -459,11 +464,11 @@ export class DetachedCapsule {
      * capsule rather than sixty times a second. */
     _applyBackground() {
         const {alpha, border} = this._phaseStyle ??
-            {alpha: 0.95, border: `rgba(${MAUVE}, 0.4)`};
+            {alpha: 0.95, border: EDGE_FULL};
 
         this.actor.set_style([
             `background-color: rgba(${BASE}, ${alpha});`,
-            `border: 1px solid ${border};`,
+            `border: ${EDGE_WIDTH}px solid ${border};`,
             'border-radius: 999px;',
             'box-shadow: 0 6px 18px rgba(0, 0, 0, 0.30);',
         ].join(' '));

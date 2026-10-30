@@ -87,8 +87,11 @@ const OWN_CHROME_NAMES = new Set([
 
 /* Timer surfaces. The two accents differ in lightness as well as hue, so the
  * running and paused states stay apart without relying on colour alone. */
+/* The lengths people actually choose, after StudiesTimer's own quick picks. */
+const PRESET_MINUTES = [5, 15, 25, 45, 60];
+
 const RING_SIZE = 66;
-const RING_DOT_RADIUS = 3.2;
+const RING_WIDTH = 5;
 const DOT_SIZE = 7;
 /* How long a fullscreen state must hold before the island reacts to it. */
 const AUTOHIDE_SETTLE_MS = 250;
@@ -182,7 +185,7 @@ export default class DynamicIslandExtension extends Extension {
 
         /* The duration is edited from inside the island, so it changes often and
          * needs only the timer resynced -- not the whole layout. */
-        this._connect(this._settings, 'changed::focus-duration',
+        this._connect(this._settings, 'changed::focus-seconds',
             () => this._onDurationChanged());
 
         /* Clicks in the top strip belong to the window underneath, and that
@@ -968,7 +971,7 @@ export default class DynamicIslandExtension extends Extension {
     _queueHideUnit(unit) {
         this._cancelHideTimer(unit);
         if (!this._shouldAutoHide(unit) || this._anyMenuOpen() ||
-            this._searchPane?.hasGrab)
+            this._searchPane?.hasGrab || this._timerEntryGrab)
             return;
 
         unit.hideTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
@@ -1602,9 +1605,9 @@ export default class DynamicIslandExtension extends Extension {
         ringStack.connect('scroll-event', (_actor, event) => {
             const direction = event.get_scroll_direction();
             if (direction === Clutter.ScrollDirection.UP)
-                this._changeDuration(+1);
+                this._nudgeDuration(+60);
             else if (direction === Clutter.ScrollDirection.DOWN)
-                this._changeDuration(-1);
+                this._nudgeDuration(-60);
             else
                 return Clutter.EVENT_PROPAGATE;
 
@@ -1615,12 +1618,29 @@ export default class DynamicIslandExtension extends Extension {
         this._ring.connect('repaint', () => this._paintRing());
         ringStack.add_child(this._ring);
 
-        this._timerLabel = new St.Label({
+        /* A button rather than a label: the time is where you type a new one,
+         * which is the only place anyone would look for it. */
+        this._timerButton = new St.Button({
             style_class: 'di-timer-time',
             x_align: Clutter.ActorAlign.CENTER,
             y_align: Clutter.ActorAlign.CENTER,
+            can_focus: true,
         });
-        ringStack.add_child(this._timerLabel);
+        this._timerLabel = new St.Label({y_align: Clutter.ActorAlign.CENTER});
+        this._timerButton.set_child(this._timerLabel);
+        this._timerButton.connect('clicked', () => this._openTimerEntry());
+        ringStack.add_child(this._timerButton);
+
+        this._timerEntry = new St.Entry({
+            style_class: 'di-timer-entry',
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+            can_focus: true,
+            visible: false,
+        });
+        this._timerEntry.clutter_text.connect('key-press-event',
+            (_actor, event) => this._onTimerEntryKey(event));
+        ringStack.add_child(this._timerEntry);
 
         const text = new St.BoxLayout({
             orientation: Clutter.Orientation.VERTICAL,
@@ -1633,21 +1653,26 @@ export default class DynamicIslandExtension extends Extension {
         this._timerState = new St.Label({style_class: 'di-timer-state', text: 'Focus'});
         text.add_child(this._timerState);
 
-        /* The duration is set here rather than only in the preferences: the
-         * buttons move by `duration-step`, a scroll on the ring by one minute. */
-        const stepper = new St.BoxLayout({style_class: 'di-stepper'});
-        text.add_child(stepper);
+        /* Three ways to set the length, because none of them covers every case.
+         * A pair of buttons stepping by five was the only one before, and it
+         * could not reach one minute from forty-five without passing through
+         * 26 and 31. Presets for the lengths people actually pick, a scroll on
+         * the ring for a nudge, and the time itself is a field you type into. */
+        const presets = new St.BoxLayout({style_class: 'di-presets'});
+        text.add_child(presets);
 
-        this._minusButton = this._stepperButton('list-remove-symbolic', -1);
-        this._timerHint = new St.Label({
-            style_class: 'di-timer-hint',
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-        this._plusButton = this._stepperButton('list-add-symbolic', +1);
-
-        stepper.add_child(this._minusButton);
-        stepper.add_child(this._timerHint);
-        stepper.add_child(this._plusButton);
+        this._presetButtons = [];
+        for (const minutes of PRESET_MINUTES) {
+            const button = new St.Button({
+                style_class: 'di-preset',
+                label: minutes < 60 ? `${minutes}` : `${minutes / 60} h`,
+                can_focus: true,
+            });
+            button._diMinutes = minutes;
+            button.connect('clicked', () => this._setFocusSeconds(minutes * 60));
+            presets.add_child(button);
+            this._presetButtons.push(button);
+        }
 
         const buttons = new St.BoxLayout({
             style_class: 'di-controls',
@@ -1676,27 +1701,110 @@ export default class DynamicIslandExtension extends Extension {
         return row;
     }
 
-    _stepperButton(iconName, sign) {
-        const button = new St.Button({
-            style_class: 'di-step',
-            child: new St.Icon({icon_name: iconName, icon_size: 11}),
-            can_focus: true,
+    /* The field lives over the ring, so the time you are editing is where the
+     * time already was. It needs a modal grab for the same reason the search
+     * pane does: the island is chrome, and chrome receives no key events. */
+    _openTimerEntry() {
+        if (this._timerEntryGrab || this._timerRunning)
+            return;
+
+        const grab = Main.pushModal(this._timerEntry, {
+            actionMode: Shell.ActionMode.NORMAL,
         });
-        button.connect('clicked',
-            () => this._changeDuration(sign * this._settings.get_int('duration-step')));
-        return button;
+        if (!grab)
+            return;
+
+        this._timerEntryGrab = grab;
+        this._cancelCollapseTimer();
+        this._cancelAllHideTimers();
+
+        this._timerButton.hide();
+        this._timerEntry.show();
+        this._timerEntry.set_text(this._formatDuration(this._focusSeconds()));
+
+        global.stage.set_key_focus(this._timerEntry.clutter_text);
+        this._timerEntry.clutter_text.set_selection(0, -1);
+    }
+
+    _closeTimerEntry(commit) {
+        if (!this._timerEntryGrab)
+            return;
+
+        const grab = this._timerEntryGrab;
+        this._timerEntryGrab = null;
+
+        if (commit) {
+            const seconds = this._parseDuration(this._timerEntry.get_text());
+            if (seconds !== null)
+                this._setFocusSeconds(seconds);
+        }
+
+        this._timerEntry.hide();
+        this._timerButton.show();
+
+        Main.popModal(grab);
+        global.stage.set_key_focus(null);
+
+        this._queueCollapse();
+    }
+
+    _onTimerEntryKey(event) {
+        switch (event.get_key_symbol()) {
+        case Clutter.KEY_Escape:
+            this._closeTimerEntry(false);
+            return Clutter.EVENT_STOP;
+
+        case Clutter.KEY_Return:
+        case Clutter.KEY_KP_Enter:
+        case Clutter.KEY_ISO_Enter:
+            this._closeTimerEntry(true);
+            return Clutter.EVENT_STOP;
+
+        default:
+            return Clutter.EVENT_PROPAGATE;
+        }
+    }
+
+    /* "25" is twenty-five minutes, "25:30" minutes and seconds, "1:05:00"
+     * hours as well -- the reading anyone would give a clock. Null for
+     * anything else, which leaves the current length alone rather than
+     * guessing at what was meant. */
+    _parseDuration(text) {
+        const parts = String(text).trim().split(':');
+        if (parts.length > 3 || parts.some(part => !/^\d{1,3}$/.test(part.trim())))
+            return null;
+
+        const numbers = parts.map(part => parseInt(part, 10));
+
+        if (numbers.length === 1)
+            return numbers[0] * 60;
+        if (numbers.length === 2)
+            return numbers[0] * 60 + numbers[1];
+        return numbers[0] * 3600 + numbers[1] * 60 + numbers[2];
+    }
+
+    _formatDuration(seconds) {
+        const minutes = Math.floor(seconds / 60);
+        const rest = seconds % 60;
+
+        return rest === 0
+            ? `${minutes}`
+            : `${minutes}:${rest.toString().padStart(2, '0')}`;
+    }
+
+    _nudgeDuration(deltaSeconds) {
+        this._setFocusSeconds(this._focusSeconds() + deltaSeconds);
     }
 
     /* Clamped by the schema's own range, so the island can never write a value
      * the settings would reject. */
-    _changeDuration(deltaMinutes) {
-        const key = this._settings.settings_schema.get_key('focus-duration');
+    _setFocusSeconds(seconds) {
+        const key = this._settings.settings_schema.get_key('focus-seconds');
         const [, range] = key.get_range().deepUnpack();
         const [min, max] = range.deepUnpack();
 
-        const next = Math.max(min, Math.min(max,
-            this._settings.get_int('focus-duration') + deltaMinutes));
-        this._settings.set_int('focus-duration', next);
+        this._settings.set_int('focus-seconds',
+            Math.max(min, Math.min(max, Math.round(seconds))));
     }
 
     _onDurationChanged() {
@@ -1714,7 +1822,7 @@ export default class DynamicIslandExtension extends Extension {
     }
 
     _focusSeconds() {
-        return this._settings.get_int('focus-duration') * 60;
+        return this._settings.get_int('focus-seconds');
     }
 
     /* A dot beside the clock, so a running session is visible while the island
@@ -1780,7 +1888,7 @@ export default class DynamicIslandExtension extends Extension {
                     this._timerTick = 0;
                     this._timerRunning = false;
                     this._syncTimer();
-                    const minutes = this._settings.get_int('focus-duration');
+                    const minutes = Math.round(this._focusSeconds() / 60);
                     this._events?.emitTimerDone(`${minutes} min de focus`);
                     this._postTimerNotification(minutes);
                     return GLib.SOURCE_REMOVE;
@@ -1848,12 +1956,16 @@ export default class DynamicIslandExtension extends Extension {
         this._timerState.text = this._timerRunning
             ? 'Focus'
             : (idle ? 'Focus' : 'En pause');
-        this._timerHint.text = `${this._settings.get_int('focus-duration')} min`;
-
-        /* Changing the length mid-session would be confusing, so the stepper is
-         * live only while the timer is idle. */
-        this._minusButton.reactive = idle;
-        this._plusButton.reactive = idle;
+        /* Changing the length mid-session would be confusing, so the presets
+         * and the field are live only while the timer is idle. */
+        const total_minutes = Math.round(total / 60);
+        for (const button of this._presetButtons ?? []) {
+            button.reactive = idle;
+            button.remove_style_pseudo_class('checked');
+            if (button._diMinutes === total_minutes && total % 60 === 0)
+                button.add_style_pseudo_class('checked');
+        }
+        this._timerButton.reactive = idle;
 
         this._timerToggle.child.icon_name = this._timerRunning
             ? 'media-playback-pause-symbolic'
@@ -1868,35 +1980,33 @@ export default class DynamicIslandExtension extends Extension {
         this._ring?.queue_repaint();
     }
 
-    /* A circle of dots rather than one continuous arc: each dot is worth the
-     * session divided by their count, and goes out once its own share has
-     * elapsed, clockwise from twelve o'clock. */
+    /* One continuous arc, not a count of dots: the session is a quantity of
+     * time, and an arc that shortens says so without rounding to the nearest
+     * dot. The remaining time is what is drawn, so the ring empties as the
+     * session runs out. */
     _paintRing() {
         const cr = this._ring.get_context();
 
         const total = this._focusSeconds();
         const left = Math.min(this._timerRemaining, total);
-        const elapsed = total > 0 ? 1 - left / total : 0;
-
-        const count = this._settings.get_int('ring-dots');
-        const spent = Math.floor(elapsed * count + 1e-9);
+        const fraction = total > 0 ? left / total : 0;
 
         const half = RING_SIZE / 2;
-        const radius = half - RING_DOT_RADIUS - 2;
+        const radius = half - RING_WIDTH / 2 - 2;
         const [r, g, b] = this._timerRunning ? RGB_RUNNING : RGB_PAUSED;
 
-        for (let i = 0; i < count; i++) {
-            const angle = -Math.PI / 2 + (i / count) * 2 * Math.PI;
-            const x = half + radius * Math.cos(angle);
-            const y = half + radius * Math.sin(angle);
+        cr.setLineWidth(RING_WIDTH);
+        cr.setLineCap(1); /* Cairo.LineCap.ROUND */
 
-            if (i < spent)
-                cr.setSourceRGBA(1, 1, 1, 0.14); /* spent: out */
-            else
-                cr.setSourceRGBA(r, g, b, 1); /* still to come: lit */
+        cr.setSourceRGBA(1, 1, 1, 0.12);
+        cr.arc(half, half, radius, 0, 2 * Math.PI);
+        cr.stroke();
 
-            cr.arc(x, y, RING_DOT_RADIUS, 0, 2 * Math.PI);
-            cr.fill();
+        if (fraction > 0.001) {
+            const start = -Math.PI / 2;
+            cr.setSourceRGBA(r, g, b, 1);
+            cr.arc(half, half, radius, start, start + fraction * 2 * Math.PI);
+            cr.stroke();
         }
 
         cr.$dispose();
@@ -1915,6 +2025,7 @@ export default class DynamicIslandExtension extends Extension {
     }
 
     _destroyIslandBody() {
+        this._closeTimerEntry(false);
         this._cancelCollapseTimer();
         this._stopGeometry();
         this._timerStop();
@@ -1982,9 +2093,10 @@ export default class DynamicIslandExtension extends Extension {
         if (!this._expanded)
             return;
 
-        /* Somebody is typing in the search field. The pointer wandering off is
-         * not a reason to take the island away from them. */
-        if (this._searchPane?.hasGrab)
+        /* Somebody is typing -- in the search field, or in the timer's own.
+         * The pointer wandering off is not a reason to take the island away
+         * from them mid-word. */
+        if (this._searchPane?.hasGrab || this._timerEntryGrab)
             return;
 
         this._collapseTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT,

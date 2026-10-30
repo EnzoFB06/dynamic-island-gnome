@@ -68,17 +68,21 @@ The panes:
 - **Now playing** — title, artist, cover art and transport controls for any MPRIS
   player. Remote cover art (Spotify serves an `https` URL) is downloaded once into
   `~/.cache/<uuid>/` and painted from there.
-- **A focus timer** — a ring of dots, each worth the session length divided by their
-  count, going dark as their share elapses. The length is set from inside the island
-  (the − and + buttons, or scrolling on the ring) as well as from the preferences. While
-  a session runs, a coloured dot sits next to the clock in the collapsed island: blue
-  while running, amber while paused.
-- **Agents** — one robot per running Claude Code session, each drawn rather than
+- **A focus timer** — a ring that empties as the session runs down. The length is set
+  three ways, because none of them covers every case: presets for the lengths people
+  actually pick, a scroll on the ring for a nudge of one minute, and the time in the
+  middle of the ring is a field you can type into (`25`, `1:30`, `1:05:00`). It is
+  stored in seconds, so a session can be ninety seconds long. While a session runs, a
+  coloured dot sits next to the clock in the collapsed island: blue while running,
+  amber while paused.
+- **Agents** — one robot per Claude Code session that is doing something, each drawn rather than
   assembled from icons, because the state is the pose: a working agent bobs and
   its eyes scan, one waiting on you holds still with its eyes wide, one that has
-  finished tilts its head with its eyes shut. Up to three of them also sit beside
-  the clock in the collapsed pill, so an agent working in the background is
-  visible without opening anything. This needs the hook below.
+  finished tilts its head with its eyes shut -- and then, a few seconds later,
+  goes. A list of sessions that all finished an hour ago is not information. Up
+  to three of them also sit beside the clock in the collapsed pill, so an agent
+  working in the background is visible without opening anything. This needs the
+  hook below.
 - **Search** — the shell's own `SearchResultsView`, the object the overview uses,
   so everything the desktop can already find is found here too and ranked the
   same way. Click the field to type: the island lives in the shell's chrome, and
