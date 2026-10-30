@@ -90,6 +90,10 @@ const OWN_CHROME_NAMES = new Set([
 /* The lengths people actually choose, after StudiesTimer's own quick picks. */
 const PRESET_MINUTES = [5, 15, 25, 45, 60];
 
+/* Wide enough for three fields, their captions and the two buttons. The island
+ * widens to this while the editor is open and goes back afterwards. */
+const TIMER_EDITOR_WIDTH = 470;
+
 const RING_SIZE = 66;
 const RING_WIDTH = 5;
 const DOT_SIZE = 7;
@@ -143,6 +147,7 @@ export default class DynamicIslandExtension extends Extension {
          * land straight in the centre box instead of the island's top row. */
         this._buildIslandBody();
         this._gatherIndicators();
+        this._sweepOrphanBodies();
         this._layoutTopRow();
         this._setupMpris();
         this._trackFocusWindow();
@@ -351,6 +356,43 @@ export default class DynamicIslandExtension extends Extension {
         /* Let the shell re-decide what should be hidden now that it is back in
          * charge of fullscreen visibility. */
         Main.layoutManager._updateVisibility();
+    }
+
+    /* The chrome sweep cannot see this one: the island body lives in the
+     * panel's centre box, not in uiGroup. It runs after _gatherIndicators(),
+     * not before, and that order is the whole point -- an abandoned body may
+     * still be holding the shell's own clock and control centre, and
+     * destroying it then would destroy them for good. Gathering moves them
+     * into ours first; whatever is left behind is residue.
+     *
+     * The check is kept anyway. It costs nothing and the failure it guards
+     * against is unrecoverable. */
+    _sweepOrphanBodies() {
+        const centerBox = Main.panel._centerBox;
+        let swept = 0;
+
+        for (const child of centerBox.get_children()) {
+            if (child.name !== 'dynamicIslandBody' || child === this._islandBody)
+                continue;
+
+            const holdsTheShells = ISLAND_ROLES.some(role => {
+                const container = Main.panel.statusArea[role]?.container;
+                return container && child.contains(container);
+            });
+
+            if (holdsTheShells) {
+                log('dynamic-island: an orphaned body still holds the shell\'s own ' +
+                    'indicators; leaving it alone');
+                continue;
+            }
+
+            centerBox.remove_child(child);
+            child.destroy();
+            swept++;
+        }
+
+        if (swept > 0)
+            log(`dynamic-island: swept ${swept} orphaned island body/bodies`);
     }
 
     /* Nothing of ours should exist in the chrome before we build it. Anything
@@ -971,7 +1013,7 @@ export default class DynamicIslandExtension extends Extension {
     _queueHideUnit(unit) {
         this._cancelHideTimer(unit);
         if (!this._shouldAutoHide(unit) || this._anyMenuOpen() ||
-            this._searchPane?.hasGrab || this._timerEntryGrab)
+            this._searchPane?.hasGrab || this._timerEditorGrab)
             return;
 
         unit.hideTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
@@ -1277,7 +1319,8 @@ export default class DynamicIslandExtension extends Extension {
         this._expandedBox.add_child(this._deck.actor);
 
         this._deck.add({id: 'media', name: 'Lecture', actor: this._buildMediaPane()});
-        this._deck.add({id: 'focus', name: 'Focus', actor: this._buildTimer()});
+        this._focusPane =
+            this._deck.add({id: 'focus', name: 'Focus', actor: this._buildTimer()});
 
         this._systemPane = new SystemPane();
         this._agentsPane = new AgentsPane({
@@ -1424,6 +1467,15 @@ export default class DynamicIslandExtension extends Extension {
             return;
 
         this._settings.set_string('active-pane', this._deck.activeId);
+        this._morphToContent();
+    }
+
+    /* Both dimensions, from whatever the active pane now asks for. A pane can
+     * change its own width while it is up -- the timer's editor does -- so this
+     * is not only a pane-switch path. */
+    _morphToContent() {
+        if (!this._expanded || !this._expandedBox)
+            return;
 
         const fromWidth = this._expandedBox.width;
         const fromHeight = this._expandedBox.height;
@@ -1631,16 +1683,7 @@ export default class DynamicIslandExtension extends Extension {
         this._timerButton.connect('clicked', () => this._openTimerEntry());
         ringStack.add_child(this._timerButton);
 
-        this._timerEntry = new St.Entry({
-            style_class: 'di-timer-entry',
-            x_align: Clutter.ActorAlign.CENTER,
-            y_align: Clutter.ActorAlign.CENTER,
-            can_focus: true,
-            visible: false,
-        });
-        this._timerEntry.clutter_text.connect('key-press-event',
-            (_actor, event) => this._onTimerEntryKey(event));
-        ringStack.add_child(this._timerEntry);
+
 
         const text = new St.BoxLayout({
             orientation: Clutter.Orientation.VERTICAL,
@@ -1674,6 +1717,17 @@ export default class DynamicIslandExtension extends Extension {
             this._presetButtons.push(button);
         }
 
+        /* Anything the presets do not cover. Pressing it widens the island into
+         * a proper editor rather than trying to fit three fields into the hole
+         * in the middle of the ring. */
+        this._editButton = new St.Button({
+            style_class: 'di-preset di-preset-edit',
+            child: new St.Icon({icon_name: 'document-edit-symbolic', icon_size: 11}),
+            can_focus: true,
+        });
+        this._editButton.connect('clicked', () => this._openTimerEditor());
+        presets.add_child(this._editButton);
+
         const buttons = new St.BoxLayout({
             style_class: 'di-controls',
             y_align: Clutter.ActorAlign.CENTER,
@@ -1696,100 +1750,216 @@ export default class DynamicIslandExtension extends Extension {
         reset.connect('clicked', () => this._timerReset());
         buttons.add_child(reset);
 
+        this._timerRow = row;
+
+        const pane = new St.BoxLayout({
+            orientation: Clutter.Orientation.VERTICAL,
+            x_expand: true,
+        });
+        pane.add_child(row);
+        pane.add_child(this._buildTimerEditor());
+
         this._syncTimer();
 
-        return row;
+        return pane;
     }
 
-    /* The field lives over the ring, so the time you are editing is where the
-     * time already was. It needs a modal grab for the same reason the search
-     * pane does: the island is chrome, and chrome receives no key events. */
-    _openTimerEntry() {
-        if (this._timerEntryGrab || this._timerRunning)
+    /* Hours, minutes and seconds as three fields, the way a timer that lets you
+     * set a length usually asks for it. It takes the pane's whole width, which
+     * is why the island widens for it: three fields and their labels do not fit
+     * beside a ring in 380 px. */
+    _buildTimerEditor() {
+        this._timerEditor = new St.BoxLayout({
+            style_class: 'di-editor',
+            x_expand: true,
+            x_align: Clutter.ActorAlign.CENTER,
+            visible: false,
+        });
+
+        this._timerFields = {};
+
+        const units = [
+            ['hours', 'heures'],
+            ['minutes', 'minutes'],
+            ['seconds', 'secondes'],
+        ];
+
+        units.forEach(([key, caption], index) => {
+            if (index > 0) {
+                this._timerEditor.add_child(new St.Label({
+                    style_class: 'di-editor-colon',
+                    text: ':',
+                    y_align: Clutter.ActorAlign.CENTER,
+                }));
+            }
+
+            const column = new St.BoxLayout({
+                orientation: Clutter.Orientation.VERTICAL,
+                x_align: Clutter.ActorAlign.CENTER,
+            });
+
+            const field = new St.Entry({
+                style_class: 'di-editor-field',
+                can_focus: true,
+            });
+            field.clutter_text.connect('key-press-event',
+                (_actor, event) => this._onEditorKey(event, key));
+            /* Digits only: the value is parsed on commit anyway, but letting
+             * letters appear and then silently vanish is worse than refusing
+             * them as they are typed. */
+            field.clutter_text.connect('insert-text',
+                (text, _added, length, _position) => {
+                    if (!/^\d*$/.test(_added.slice(0, length)))
+                        text.emit_stop_by_name?.('insert-text');
+                });
+
+            column.add_child(field);
+            column.add_child(new St.Label({
+                style_class: 'di-editor-caption',
+                text: caption,
+                x_align: Clutter.ActorAlign.CENTER,
+            }));
+
+            this._timerEditor.add_child(column);
+            this._timerFields[key] = field;
+        });
+
+        const actions = new St.BoxLayout({
+            style_class: 'di-editor-actions',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        this._timerEditor.add_child(actions);
+
+        const accept = new St.Button({
+            style_class: 'di-button di-button-accent',
+            child: new St.Icon({icon_name: 'object-select-symbolic', icon_size: 15}),
+            can_focus: true,
+        });
+        accept.connect('clicked', () => this._closeTimerEditor(true));
+        actions.add_child(accept);
+
+        const cancel = new St.Button({
+            style_class: 'di-button',
+            child: new St.Icon({icon_name: 'window-close-symbolic', icon_size: 15}),
+            can_focus: true,
+        });
+        cancel.connect('clicked', () => this._closeTimerEditor(false));
+        actions.add_child(cancel);
+
+        return this._timerEditor;
+    }
+
+    /* Opening it widens the island: the pane asks for a width of its own and
+     * the deck's usual morph carries the island there, the same path the
+     * search pane uses. The modal grab is needed for the same reason too --
+     * the island is chrome, and chrome receives no key events. */
+    _openTimerEditor() {
+        if (this._timerEditorGrab || this._timerRunning || !this._timerEditor)
             return;
 
-        const grab = Main.pushModal(this._timerEntry, {
+        const grab = Main.pushModal(this._timerEditor, {
             actionMode: Shell.ActionMode.NORMAL,
         });
         if (!grab)
             return;
 
-        this._timerEntryGrab = grab;
+        this._timerEditorGrab = grab;
         this._cancelCollapseTimer();
         this._cancelAllHideTimers();
 
-        this._timerButton.hide();
-        this._timerEntry.show();
-        this._timerEntry.set_text(this._formatDuration(this._focusSeconds()));
+        const total = this._focusSeconds();
+        this._timerFields.hours.set_text(`${Math.floor(total / 3600)}`);
+        this._timerFields.minutes.set_text(`${Math.floor((total % 3600) / 60)}`);
+        this._timerFields.seconds.set_text(`${total % 60}`);
 
-        global.stage.set_key_focus(this._timerEntry.clutter_text);
-        this._timerEntry.clutter_text.set_selection(0, -1);
+        this._timerRow.hide();
+        this._timerEditor.show();
+
+        if (this._focusPane)
+            this._focusPane.width = TIMER_EDITOR_WIDTH;
+        this._morphToContent();
+
+        this._focusEditorField('minutes');
     }
 
-    _closeTimerEntry(commit) {
-        if (!this._timerEntryGrab)
+    _closeTimerEditor(commit) {
+        if (!this._timerEditorGrab)
             return;
 
-        const grab = this._timerEntryGrab;
-        this._timerEntryGrab = null;
+        const grab = this._timerEditorGrab;
+        this._timerEditorGrab = null;
 
         if (commit) {
-            const seconds = this._parseDuration(this._timerEntry.get_text());
-            if (seconds !== null)
+            const value = key => parseInt(this._timerFields[key].get_text(), 10) || 0;
+            const seconds = value('hours') * 3600 + value('minutes') * 60 + value('seconds');
+            if (seconds > 0)
                 this._setFocusSeconds(seconds);
         }
 
-        this._timerEntry.hide();
-        this._timerButton.show();
+        this._timerEditor.hide();
+        this._timerRow.show();
+
+        if (this._focusPane)
+            this._focusPane.width = undefined;
 
         Main.popModal(grab);
         global.stage.set_key_focus(null);
 
+        this._morphToContent();
         this._queueCollapse();
     }
 
-    _onTimerEntryKey(event) {
+    _focusEditorField(key) {
+        const field = this._timerFields?.[key];
+        if (!field)
+            return;
+
+        global.stage.set_key_focus(field.clutter_text);
+        field.clutter_text.set_selection(0, -1);
+    }
+
+    /* Tab walks the three fields, Enter accepts, Escape abandons. Up and down
+     * nudge the field under the cursor, which is what makes it usable without
+     * retyping a whole value to change one digit. */
+    _onEditorKey(event, key) {
+        const order = ['hours', 'minutes', 'seconds'];
+        const index = order.indexOf(key);
+        const state = event.get_state();
+        const shift = (state & Clutter.ModifierType.SHIFT_MASK) !== 0;
+
         switch (event.get_key_symbol()) {
         case Clutter.KEY_Escape:
-            this._closeTimerEntry(false);
+            this._closeTimerEditor(false);
             return Clutter.EVENT_STOP;
 
         case Clutter.KEY_Return:
         case Clutter.KEY_KP_Enter:
         case Clutter.KEY_ISO_Enter:
-            this._closeTimerEntry(true);
+            this._closeTimerEditor(true);
             return Clutter.EVENT_STOP;
+
+        case Clutter.KEY_Tab:
+        case Clutter.KEY_ISO_Left_Tab:
+            this._focusEditorField(
+                order[(index + (shift ? -1 : 1) + order.length) % order.length]);
+            return Clutter.EVENT_STOP;
+
+        case Clutter.KEY_Up:
+        case Clutter.KEY_Down: {
+            const field = this._timerFields[key];
+            const delta = event.get_key_symbol() === Clutter.KEY_Up ? 1 : -1;
+            const ceiling = key === 'hours' ? 23 : 59;
+            const next = Math.max(0, Math.min(ceiling,
+                (parseInt(field.get_text(), 10) || 0) + delta));
+
+            field.set_text(`${next}`);
+            field.clutter_text.set_selection(0, -1);
+            return Clutter.EVENT_STOP;
+        }
 
         default:
             return Clutter.EVENT_PROPAGATE;
         }
-    }
-
-    /* "25" is twenty-five minutes, "25:30" minutes and seconds, "1:05:00"
-     * hours as well -- the reading anyone would give a clock. Null for
-     * anything else, which leaves the current length alone rather than
-     * guessing at what was meant. */
-    _parseDuration(text) {
-        const parts = String(text).trim().split(':');
-        if (parts.length > 3 || parts.some(part => !/^\d{1,3}$/.test(part.trim())))
-            return null;
-
-        const numbers = parts.map(part => parseInt(part, 10));
-
-        if (numbers.length === 1)
-            return numbers[0] * 60;
-        if (numbers.length === 2)
-            return numbers[0] * 60 + numbers[1];
-        return numbers[0] * 3600 + numbers[1] * 60 + numbers[2];
-    }
-
-    _formatDuration(seconds) {
-        const minutes = Math.floor(seconds / 60);
-        const rest = seconds % 60;
-
-        return rest === 0
-            ? `${minutes}`
-            : `${minutes}:${rest.toString().padStart(2, '0')}`;
     }
 
     _nudgeDuration(deltaSeconds) {
@@ -2025,7 +2195,17 @@ export default class DynamicIslandExtension extends Extension {
     }
 
     _destroyIslandBody() {
-        this._closeTimerEntry(false);
+        /* Everything up to removing the body is best effort. One of these
+         * throwing used to abandon the body inside the panel's centre box --
+         * where the orphan sweep could not see it, since that sweep only walks
+         * the shell's chrome -- and the next instance built a second island
+         * beside the first. Measured: a centre box 627 px wide holding two. */
+        try {
+            this._closeTimerEditor(false);
+        } catch (e) {
+            logError(e, 'dynamic-island: could not close the timer editor');
+        }
+
         this._cancelCollapseTimer();
         this._stopGeometry();
         this._timerStop();
@@ -2096,7 +2276,7 @@ export default class DynamicIslandExtension extends Extension {
         /* Somebody is typing -- in the search field, or in the timer's own.
          * The pointer wandering off is not a reason to take the island away
          * from them mid-word. */
-        if (this._searchPane?.hasGrab || this._timerEntryGrab)
+        if (this._searchPane?.hasGrab || this._timerEditorGrab)
             return;
 
         this._collapseTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT,

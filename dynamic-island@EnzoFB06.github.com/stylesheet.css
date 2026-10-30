@@ -403,14 +403,53 @@
   background-color: rgba(255, 255, 255, 0.14);
 }
 
-#dynamicIslandExpanded .di-timer-entry {
-  font-size: 0.95em;
+/* ------------------------------------------------------- timer editor ---
+ * Hours, minutes and seconds. The island widens for it, so the three fields
+ * get room to be fields rather than a cramped single box. */
+#dynamicIslandExpanded .di-editor {
+  spacing: 8px;
+  padding: 6px 4px;
+}
+
+#dynamicIslandExpanded .di-editor-field {
+  font-size: 1.15em;
   font-weight: bold;
   color: #ffffff;
-  width: 54px;
-  padding: 1px 4px;
-  border-radius: 6px;
-  background-color: rgba(255, 255, 255, 0.16);
+  width: 58px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   caret-color: #ffffff;
-  selection-background-color: rgba(106, 169, 224, 0.8);
+  selection-background-color: rgba(106, 169, 224, 0.85);
+}
+
+#dynamicIslandExpanded .di-editor-field:focus {
+  background-color: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(106, 169, 224, 0.9);
+}
+
+#dynamicIslandExpanded .di-editor-caption {
+  font-size: 0.62em;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.45);
+  padding-top: 3px;
+}
+
+/* Sits between the fields, level with them rather than with their captions. */
+#dynamicIslandExpanded .di-editor-colon {
+  font-size: 1.1em;
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.35);
+  padding-bottom: 12px;
+}
+
+#dynamicIslandExpanded .di-editor-actions {
+  spacing: 6px;
+  padding-bottom: 12px;
+  padding-left: 6px;
+}
+
+#dynamicIslandExpanded .di-preset-edit {
+  padding: 2px 6px;
 }

@@ -70,9 +70,10 @@ The panes:
   `~/.cache/<uuid>/` and painted from there.
 - **A focus timer** — a ring that empties as the session runs down. The length is set
   three ways, because none of them covers every case: presets for the lengths people
-  actually pick, a scroll on the ring for a nudge of one minute, and the time in the
-  middle of the ring is a field you can type into (`25`, `1:30`, `1:05:00`). It is
-  stored in seconds, so a session can be ninety seconds long. While a session runs, a
+  actually pick, a scroll on the ring for a nudge of one minute, and an edit button
+  that widens the island into three fields -- hours, minutes, seconds. Tab walks them,
+  the arrow keys nudge the one under the cursor, Enter accepts. The length is stored in
+  seconds, so a session can be ninety seconds long. While a session runs, a
   coloured dot sits next to the clock in the collapsed island: blue while running,
   amber while paused.
 - **Agents** — one robot per Claude Code session that is doing something, each drawn rather than
