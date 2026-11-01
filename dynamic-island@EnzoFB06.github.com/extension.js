@@ -298,6 +298,7 @@ export default class DynamicIslandExtension extends Extension {
         this._cancelAllHideTimers();
         this._cancelSyncTimer();
         this._cancelExpandTimer();
+        this._releaseGrabs();
         this._events?.stop();
         this._events = null;
         this._restoreBanners();
@@ -356,6 +357,20 @@ export default class DynamicIslandExtension extends Extension {
         /* Let the shell re-decide what should be hidden now that it is back in
          * charge of fullscreen visibility. */
         Main.layoutManager._updateVisibility();
+    }
+
+    _isOwnRow(actor) {
+        return actor?.name === 'dynamicIslandTopRow' ||
+            actor?.name === 'dynamicIslandBody';
+    }
+
+    /* Where the shell itself keeps each of these, for when we never saw them
+     * there: the clock in the centre, the control centre on the right. Only
+     * used when no genuine origin was recorded -- which happens when the
+     * indicator was already inside an abandoned island when we found it. */
+    _defaultHome(role) {
+        const panel = Main.panel;
+        return role === 'quickSettings' ? panel._rightBox : panel._centerBox;
     }
 
     /* The chrome sweep cannot see this one: the island body lives in the
@@ -2344,6 +2359,11 @@ export default class DynamicIslandExtension extends Extension {
         if (!this._expandedBox || !this._expanded)
             return;
 
+        /* Collapsing is already blocked while a field holds the keyboard, so
+         * reaching here means both should be released already. Belt to those
+         * braces. */
+        this._releaseGrabs();
+
         this._expanded = false;
 
         /* Panes are off screen from here on: the gauges stop sampling and the
@@ -2500,6 +2520,25 @@ export default class DynamicIslandExtension extends Extension {
         }
 
         this._bannersBlocked = block;
+    }
+
+    /* Nothing of ours may hold a modal grab once the island is shut or gone. A
+     * grab routes every key and every click to its own actor, so one that
+     * outlives the island leaves windows impossible to type into or click --
+     * with nothing on screen to explain why. Both paths that close the island
+     * call this; the cost of being wrong is a desktop that looks broken. */
+    _releaseGrabs() {
+        try {
+            this._closeTimerEditor(false);
+        } catch (e) {
+            logError(e, 'dynamic-island: could not release the timer editor grab');
+        }
+
+        try {
+            this._searchPane?.releaseKeyboard();
+        } catch (e) {
+            logError(e, 'dynamic-island: could not release the search grab');
+        }
     }
 
     _restoreBanners() {
@@ -2760,8 +2799,16 @@ export default class DynamicIslandExtension extends Extension {
 
             if (parent !== centerBox) {
                 /* Remember the original box and index so disable() puts it back
-                 * exactly where the shell had it. */
-                if (parent && !this._origin.has(role)) {
+                 * exactly where the shell had it.
+                 *
+                 * Never remember one of our own rows as the origin. A previous
+                 * instance that failed to tear down leaves the real clock
+                 * sitting in its abandoned top row, and recording that as
+                 * "where the shell had it" hands the clock back to a dead actor
+                 * on the next disable -- the panel then has no clock at all
+                 * until the shell is restarted. Measured: after one such cycle,
+                 * dateMenu's parent was dynamicIslandTopRow, not panelCenter. */
+                if (parent && !this._origin.has(role) && !this._isOwnRow(parent)) {
                     this._origin.set(role, {
                         parent,
                         index: parent.get_children().indexOf(container),
@@ -2801,8 +2848,21 @@ export default class DynamicIslandExtension extends Extension {
                 const origin = this._origin.get(role);
                 if (origin)
                     container.x_expand = origin.expand;
-                if (origin?.parent && !container.get_parent())
-                    origin.parent.insert_child_at_index(container, origin.index);
+
+                if (container.get_parent())
+                    continue;
+
+                /* A recorded origin whose box has since been destroyed is no
+                 * better than none: hand the indicator to the panel instead of
+                 * to a dead actor. */
+                const home = origin?.parent && !this._isOwnRow(origin.parent)
+                    ? origin.parent
+                    : this._defaultHome(role);
+
+                if (origin?.parent === home)
+                    home.insert_child_at_index(container, origin.index);
+                else
+                    home.add_child(container);
             } catch (e) {
                 logError(e, `dynamic-island: could not restore ${role}`);
             }

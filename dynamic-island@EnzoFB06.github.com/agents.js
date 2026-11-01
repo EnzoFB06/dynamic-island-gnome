@@ -243,7 +243,18 @@ export class Robot {
     }
 
     destroy() {
-        this.actor?.destroy();
+        /* Destroying an actor runs a relayout before it returns, and that
+         * relayout wakes dash2dock-lite's animator, which throws on its own
+         * null icon -- an exception that surfaces here, in the middle of
+         * whatever loop asked for the destruction. Seen 34 times over three
+         * days, each time abandoning the rest of a prune. Their bug is not
+         * ours to fix; stopping it propagating is. */
+        try {
+            this.actor?.destroy();
+        } catch (e) {
+            logError(e, 'dynamic-island: a relayout threw while destroying a robot');
+        }
+
         this.actor = null;
     }
 }
