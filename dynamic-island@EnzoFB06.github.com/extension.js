@@ -773,10 +773,23 @@ export default class DynamicIslandExtension extends Extension {
                 continue;
 
             this._connect(menu, 'open-state-changed', (_menu, isOpen) => {
-                if (isOpen)
+                if (isOpen) {
                     this._units.forEach(u => this._revealUnit(u));
-                else
-                    this._units.forEach(u => this._queueHideUnit(u));
+                    return;
+                }
+
+                /* Closing one used to ask only for a hide, and a hide is
+                 * refused while the island is unfolded -- so an island you
+                 * unfolded, then opened the control centre from, then closed
+                 * again, simply stayed open. Nothing afterwards would have
+                 * closed it either: collapsing is driven by hover transitions,
+                 * and the pointer had not crossed anything since the menu took
+                 * the input. You had to wave the pointer over the island and
+                 * off again to give it the transition it was waiting for.
+                 *
+                 * The full pass instead. It re-derives hover from where the
+                 * pointer actually is and asks for the collapse itself. */
+                this._syncAutoHide();
             });
         }
     }
@@ -2394,6 +2407,12 @@ export default class DynamicIslandExtension extends Extension {
                  * its natural collapsed width. */
                 this._expandedBox?.set_size(-1, -1);
                 this._pinnedSize = null;
+
+                /* Hiding is refused while the island is unfolded, so a
+                 * collapse that finishes over a maximized window leaves it
+                 * sitting there in full view. Now that it is a pill again, ask
+                 * the question that was refused a moment ago. */
+                this._syncAutoHide();
             });
     }
 
