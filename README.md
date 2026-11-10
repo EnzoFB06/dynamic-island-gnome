@@ -89,6 +89,9 @@ The panes:
   same way. Click the field to type: the island lives in the shell's chrome, and
   chrome does not receive key events, so the pane takes a modal grab exactly as
   the overview does — on the click, never merely because the pane is on screen.
+  Escape, or a press anywhere outside the island, gives the keyboard back: a
+  modal grab swallows every click, so a field with no obvious way out of it is
+  a session that looks frozen.
 - **System** — processor, memory and disk as rings, with network throughput and
   uptime beside them, sampled only while the pane is on screen.
 
