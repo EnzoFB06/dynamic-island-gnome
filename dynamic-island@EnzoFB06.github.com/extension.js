@@ -1370,9 +1370,16 @@ export default class DynamicIslandExtension extends Extension {
             onHeightChange: () => this._morphToContentHeight(),
             /* A keyboard grab has to outlast the hover that opened it, or the
              * island would close under the pointer while you are typing. */
-            onGrabChanged: () => {
+            onGrabChanged: held => {
                 this._cancelCollapseTimer();
                 this._cancelAllHideTimers();
+
+                /* Letting go has to leave the island able to close itself.
+                 * Collapsing is blocked while the grab is held, so the pass
+                 * that would normally tidy up was refused for the whole time
+                 * the field was open -- and nothing repeats it afterwards. */
+                if (!held)
+                    this._syncAutoHide();
             },
         });
         this._deck.add({
@@ -1895,6 +1902,27 @@ export default class DynamicIslandExtension extends Extension {
         this._cancelCollapseTimer();
         this._cancelAllHideTimers();
 
+        /* Same trap as the search field: a modal grab swallows every click, so
+         * without this, clicking away from the editor does nothing at all and
+         * the session looks frozen. Its own buttons are children of the grabbed
+         * actor and keep working. */
+        this._editorCaptureId = this._timerEditor.connect('captured-event',
+            (_actor, event) => {
+                if (event.type() !== Clutter.EventType.BUTTON_PRESS)
+                    return Clutter.EVENT_PROPAGATE;
+
+                const island = Main.panel._centerBox;
+                const [x, y] = event.get_coords();
+                const [ix, iy] = island.get_transformed_position();
+
+                if (x >= ix && x < ix + island.width &&
+                    y >= iy && y < iy + island.height)
+                    return Clutter.EVENT_PROPAGATE;
+
+                this._closeTimerEditor(false);
+                return Clutter.EVENT_STOP;
+            });
+
         const total = this._focusSeconds();
         this._timerFields.hours.set_text(`${Math.floor(total / 3600)}`);
         this._timerFields.minutes.set_text(`${Math.floor((total % 3600) / 60)}`);
@@ -1916,6 +1944,11 @@ export default class DynamicIslandExtension extends Extension {
 
         const grab = this._timerEditorGrab;
         this._timerEditorGrab = null;
+
+        if (this._editorCaptureId) {
+            this._timerEditor.disconnect(this._editorCaptureId);
+            this._editorCaptureId = 0;
+        }
 
         if (commit) {
             const value = key => parseInt(this._timerFields[key].get_text(), 10) || 0;

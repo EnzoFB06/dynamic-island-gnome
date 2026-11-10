@@ -39,6 +39,7 @@ export class SearchPane {
         this._onHeightChange = onHeightChange;
         this._onGrabChanged = onGrabChanged;
         this._grab = null;
+        this._captureId = 0;
         this._searching = false;
         this._debounce = 0;
 
@@ -101,8 +102,36 @@ export class SearchPane {
             return;
         }
 
+        /* A modal grab swallows every click, so without this there is no way
+         * out with the mouse at all: clicking the desktop, another window, or
+         * anything else simply does nothing, and the whole session looks
+         * frozen. Clicking away is the first thing anyone tries. */
+        this._captureId = this.actor.connect('captured-event',
+            (_actor, event) => this._onCaptured(event));
+
         global.stage.set_key_focus(this._entry.clutter_text);
         this._onGrabChanged?.(true);
+    }
+
+    /* The island is the whole shape, not just this pane: a click on the clock
+     * or the control centre is still a click on the island, and should not be
+     * read as "get me out of here". */
+    _onCaptured(event) {
+        if (event.type() !== Clutter.EventType.BUTTON_PRESS)
+            return Clutter.EVENT_PROPAGATE;
+
+        const island = Main.panel._centerBox;
+        const [x, y] = event.get_coords();
+        const [ix, iy] = island.get_transformed_position();
+
+        const inside = x >= ix && x < ix + island.width &&
+            y >= iy && y < iy + island.height;
+
+        if (inside)
+            return Clutter.EVENT_PROPAGATE;
+
+        this.releaseKeyboard();
+        return Clutter.EVENT_STOP;
     }
 
     releaseKeyboard() {
@@ -111,6 +140,11 @@ export class SearchPane {
 
         const grab = this._grab;
         this._grab = null;
+
+        if (this._captureId) {
+            this.actor.disconnect(this._captureId);
+            this._captureId = 0;
+        }
 
         Main.popModal(grab);
         global.stage.set_key_focus(null);
@@ -126,12 +160,13 @@ export class SearchPane {
 
         switch (symbol) {
         case Clutter.KEY_Escape:
-            /* First Escape clears, a second one lets go: the common case is a
-             * mistyped query, not a change of mind about searching at all. */
-            if (this._entry.text)
-                this._entry.set_text('');
-            else
-                this.releaseKeyboard();
+            /* One press, out. It used to clear the text and keep the keyboard,
+             * so a first Escape after a search looked like nothing had
+             * happened -- the text vanished, the island stayed, and every
+             * click was still being swallowed. Saving a keystroke on a
+             * mistyped query is not worth a way out that nobody finds. */
+            this._entry.set_text('');
+            this.releaseKeyboard();
             return Clutter.EVENT_STOP;
 
         case Clutter.KEY_Return:
