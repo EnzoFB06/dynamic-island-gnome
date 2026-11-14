@@ -298,6 +298,7 @@ export default class DynamicIslandExtension extends Extension {
         this._cancelAllHideTimers();
         this._cancelSyncTimer();
         this._cancelExpandTimer();
+        this._stopCollapseWatchdog();
         this._releaseGrabs();
         this._events?.stop();
         this._events = null;
@@ -837,6 +838,41 @@ export default class DynamicIslandExtension extends Extension {
         if (this._autoHideTimer) {
             GLib.Source.remove(this._autoHideTimer);
             this._autoHideTimer = 0;
+        }
+    }
+
+    /* Four separate bugs now have had the same shape: the island stayed open
+     * because a hover transition never arrived. The strip stopped being
+     * reactive under the pointer; a menu took the input so nothing crossed a
+     * boundary; a collapse finished with nobody left to ask; and clicking a
+     * button inside the island leaves its hover latched, so moving away
+     * afterwards produces no transition either.
+     *
+     * Each was fixed where it happened, and each time a new way to miss the
+     * event turned up. So the condition is checked on a slow tick as well, for
+     * as long as the island is open. One timer and a pointer read per second,
+     * only while something is unfolded, and it ends the whole class: a missed
+     * transition now costs up to a second instead of stranding the island for
+     * good. */
+    _startCollapseWatchdog() {
+        if (this._watchdog)
+            return;
+
+        this._watchdog = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+            if (!this._expanded) {
+                this._watchdog = 0;
+                return GLib.SOURCE_REMOVE;
+            }
+
+            this._syncAutoHide();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _stopCollapseWatchdog() {
+        if (this._watchdog) {
+            GLib.Source.remove(this._watchdog);
+            this._watchdog = 0;
         }
     }
 
@@ -2343,9 +2379,20 @@ export default class DynamicIslandExtension extends Extension {
         this._collapseTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
             this._settings.get_int('hide-delay'), () => {
                 this._collapseTimer = 0;
+
+                /* Asked again, not just when the timer was armed. Half a
+                 * second is long enough to walk back to the island and click
+                 * into the search field, and a collapse decided before that
+                 * click would then close the field under the hands of whoever
+                 * is typing in it. The guard above is only true at the moment
+                 * it is read. */
+                if (this._searchPane?.hasGrab || this._timerEditorGrab)
+                    return GLib.SOURCE_REMOVE;
+
                 const hovered = this._units.some(u => u.island.hover || u.edge.hover);
                 if (!hovered)
                     this._collapse();
+
                 return GLib.SOURCE_REMOVE;
             });
     }
@@ -2372,6 +2419,7 @@ export default class DynamicIslandExtension extends Extension {
          * and the search field must not hold a keyboard grab, merely because
          * their pane happens to be the current one inside a closed pill. */
         this._deck.setLive(true);
+        this._startCollapseWatchdog();
 
         /* Measure the unfolded content before it is on screen, so the growth has
          * a real target rather than a guess. */
@@ -2411,6 +2459,7 @@ export default class DynamicIslandExtension extends Extension {
         this._releaseGrabs();
 
         this._expanded = false;
+        this._stopCollapseWatchdog();
 
         /* Panes are off screen from here on: the gauges stop sampling and the
          * search field drops anything it was holding, including the keyboard.
