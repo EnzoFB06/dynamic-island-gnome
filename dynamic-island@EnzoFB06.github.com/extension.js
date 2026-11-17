@@ -30,6 +30,7 @@ import Gio from 'gi://Gio';
 import Soup from 'gi://Soup';
 import GLib from 'gi://GLib';
 import GnomeDesktop from 'gi://GnomeDesktop';
+import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 
@@ -175,6 +176,18 @@ export default class DynamicIslandExtension extends Extension {
             this._trackFocusWindow();
             this._queueSyncAutoHide();
         });
+        /* The decision is now about what covers each monitor, so it has to be
+         * retaken when any window is maximized or restored -- not only when
+         * the focused one changes. Maximizing a window on the screen you are
+         * not typing on is exactly the case the old focus-based test got
+         * wrong, and nothing here would have noticed it. */
+        this._connect(global.window_manager, 'size-change',
+            () => this._queueSyncAutoHide());
+        this._connect(global.display, 'window-created',
+            () => this._queueSyncAutoHide());
+        this._connect(global.display, 'restacked',
+            () => this._queueSyncAutoHide());
+
         this._connect(Main.layoutManager, 'monitors-changed', () => {
             this._rebuildSatellites();
             this._placeUnits();
@@ -811,14 +824,42 @@ export default class DynamicIslandExtension extends Extension {
         if (mode !== 'fullscreen-and-maximized')
             return false;
 
-        /* A maximized window covers the monitor exactly once the strut is gone,
-         * but Mutter still does not call that fullscreen -- so ask the window.
-         * Both axes, so a window tiled to one half does not count. */
-        const window = global.display.focus_window;
-        return !!window &&
-            window.maximized_horizontally &&
-            window.maximized_vertically &&
-            window.get_monitor() === monitor.index;
+        return this._monitorIsCovered(monitor.index);
+    }
+
+    /* Whether anything maximized is sitting on this monitor.
+     *
+     * This used to ask global.display.focus_window instead, and then check
+     * whether that one window happened to be on this monitor. focus_window is
+     * a single global notion, so with two screens the answer was inverted: an
+     * island hid only while you were typing on its own screen, and popped back
+     * out the moment you clicked something on the other one -- with the
+     * maximized window still right underneath it. Each island was visible
+     * exactly when you were not looking at it.
+     *
+     * The island overlaps whatever is under it, focused or not, so the
+     * question belongs to the monitor. */
+    _monitorIsCovered(monitorIndex) {
+        const workspace = global.workspace_manager.get_active_workspace();
+
+        return global.get_window_actors().some(actor => {
+            const window = actor.meta_window;
+
+            if (!window || window.minimized ||
+                window.get_monitor() !== monitorIndex ||
+                !window.located_on_workspace(workspace))
+                return false;
+
+            /* Normal windows only: the desktop-icons extension keeps a
+             * desktop-type window the size of the screen, and counting it
+             * would hide every island for good. */
+            if (window.get_window_type() !== Meta.WindowType.NORMAL)
+                return false;
+
+            /* Both axes, so a window tiled to one half does not count. */
+            return window.is_fullscreen() ||
+                (window.maximized_horizontally && window.maximized_vertically);
+        });
     }
 
     /* Collapses a burst of state changes into one decision. */
