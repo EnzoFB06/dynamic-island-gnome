@@ -605,6 +605,15 @@ export default class DynamicIslandExtension extends Extension {
 
         for (const unit of this._units ?? []) {
             if (unit.isPrimary) {
+                /* The primary unit survives a reshuffle, but the index it was
+                 * built with does not: switching to mirrored displays, or
+                 * changing which screen is primary, renumbers the monitors
+                 * underneath it. A stale index makes _monitorOf() return
+                 * nothing, and from there everything quietly stops working --
+                 * _placeUnit() returns early so the reveal strip is left at
+                 * its old coordinates, and _shouldAutoHide() answers false for
+                 * want of a monitor, so the island never hides again. */
+                unit.monitorIndex = Main.layoutManager.primaryIndex;
                 keep.push(unit);
                 continue;
             }
@@ -618,6 +627,7 @@ export default class DynamicIslandExtension extends Extension {
         }
 
         this._units = keep;
+
         this._clock = null;
 
         this._buildSatellites();
